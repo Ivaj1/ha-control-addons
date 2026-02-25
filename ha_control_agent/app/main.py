@@ -39,7 +39,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.3"
+AGENT_VERSION = "0.2.5"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
@@ -66,69 +66,202 @@ CONSOLE_HTML = """<!doctype html>
   <title>HA Control Console</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #0f1419; color: #d5dde5; font-family: ui-monospace, monospace; }
-    .bar { padding: 8px 12px; background: #182029; border-bottom: 1px solid #2b3540; display: flex; gap: 8px; align-items: center; }
-    .bar input { flex: 1; min-width: 180px; background: #0f1419; color: #d5dde5; border: 1px solid #394654; padding: 6px 8px; border-radius: 4px; }
-    .bar button { background: #1f6feb; border: 0; color: white; border-radius: 4px; padding: 7px 10px; cursor: pointer; }
-    #term { height: calc(100% - 50px); width: 100%; }
+    :root {
+      --bg: #0b1016;
+      --panel: #121a24;
+      --line: #223041;
+      --text: #d8e0ea;
+      --muted: #8ea0b4;
+      --accent: #2f81f7;
+      --accent-2: #1f6feb;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: radial-gradient(1200px 700px at 10% -20%, #1a2a3d 0, var(--bg) 50%); color: var(--text); font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .app { height: 100%; display: grid; grid-template-rows: auto auto 1fr; }
+    .topbar { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #182333 0%, #121a24 100%); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2px; }
+    .title small { color: var(--muted); font-weight: 500; margin-left: 8px; }
+    .status { font-size: 12px; color: #7ee787; border: 1px solid #294733; background: #0f1d14; padding: 4px 8px; border-radius: 999px; }
+    .toolbar { border-bottom: 1px solid var(--line); background: #101823; padding: 8px 10px; display: grid; gap: 8px; grid-template-columns: 1fr auto; align-items: center; }
+    .left, .right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .token { width: min(520px, 100%); background: #0c131d; border: 1px solid #2e3b4d; color: var(--text); padding: 7px 10px; border-radius: 6px; }
+    .btn { border: 1px solid #35465c; background: #172233; color: var(--text); border-radius: 6px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+    .btn:hover { border-color: #4c6380; background: #1b2a3e; }
+    .btn.primary { border-color: #2f6ed3; background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #fff; }
+    .hint { font-size: 11px; color: var(--muted); }
+    .terminal-wrap { padding: 10px; height: 100%; min-height: 0; }
+    #term { width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.35); }
   </style>
 </head>
 <body>
-  <div class="bar">
-    <strong>HA Control Console</strong>
-    <input id="token" placeholder="Session token (optional in Ingress)" />
-    <button id="connect">Connect</button>
+  <div class="app">
+    <div class="topbar">
+      <div class="title">HA Control Console <small>Modern terminal</small></div>
+      <div id="status" class="status">Disconnected</div>
+    </div>
+    <div class="toolbar">
+      <div class="left">
+        <input id="token" class="token" placeholder="Session token (optional in Ingress)" />
+        <button id="connect" class="btn primary">Connect</button>
+        <button id="disconnect" class="btn">Disconnect</button>
+        <button id="interrupt" class="btn">Ctrl+C</button>
+        <button id="clear" class="btn">Clear</button>
+      </div>
+      <div class="right">
+        <button id="copy" class="btn">Copy</button>
+        <button id="paste" class="btn">Paste</button>
+        <button id="fontDec" class="btn">A-</button>
+        <button id="fontInc" class="btn">A+</button>
+        <span class="hint">Shortcuts: Ctrl+Shift+C / Ctrl+Shift+V</span>
+      </div>
+    </div>
+    <div class="terminal-wrap">
+      <div id="term"></div>
+    </div>
   </div>
-  <div id="term"></div>
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script>
-    const term = new Terminal({cursorBlink: true, fontSize: 14, theme: {background: "#0f1419"}});
-    term.open(document.getElementById("term"));
-    term.writeln("HA Control Agent console");
-    const tokenInput = document.getElementById("token");
-    tokenInput.value = localStorage.getItem("ha_control_session") || "";
-    let ws = null;
 
-    function calcSize() {
-      const cols = Math.max(40, Math.floor(window.innerWidth / 9));
-      const rows = Math.max(12, Math.floor((window.innerHeight - 50) / 18));
-      return { cols, rows };
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script>
+    const statusEl = document.getElementById("status");
+    const tokenInput = document.getElementById("token");
+    const connectBtn = document.getElementById("connect");
+    const disconnectBtn = document.getElementById("disconnect");
+    const interruptBtn = document.getElementById("interrupt");
+    const clearBtn = document.getElementById("clear");
+    const copyBtn = document.getElementById("copy");
+    const pasteBtn = document.getElementById("paste");
+    const fontDecBtn = document.getElementById("fontDec");
+    const fontIncBtn = document.getElementById("fontInc");
+
+    let ws = null;
+    let fontSize = Number(localStorage.getItem("ha_console_font") || "14");
+
+    const term = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontSize,
+      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+      scrollback: 10000,
+      rightClickSelectsWord: true,
+      theme: {
+        background: "#0b1016",
+        foreground: "#d8e0ea",
+        cursor: "#7ee787",
+        selectionBackground: "rgba(63, 131, 248, 0.35)"
+      }
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById("term"));
+    term.writeln("HA Control Agent console ready.");
+
+    tokenInput.value = localStorage.getItem("ha_control_session") || "";
+
+    function setStatus(message, connected) {
+      statusEl.textContent = message;
+      statusEl.style.color = connected ? "#7ee787" : "#f0c674";
+      statusEl.style.borderColor = connected ? "#294733" : "#5a471f";
+      statusEl.style.background = connected ? "#0f1d14" : "#22180f";
+    }
+
+    function wsPath() {
+      const path = window.location.pathname.replace(/\\/$/, "");
+      const base = path.endsWith("/console") ? path.slice(0, -8) : path;
+      return (base === "" ? "" : base) + "/console/ws";
+    }
+
+    function send(payload) {
+      if (!ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify(payload));
     }
 
     function sendResize() {
-      if (!ws || ws.readyState !== 1) return;
-      const { cols, rows } = calcSize();
-      term.resize(cols, rows);
-      ws.send(JSON.stringify({type: "resize", cols, rows}));
+      fitAddon.fit();
+      send({ type: "resize", cols: term.cols, rows: term.rows });
     }
 
     function connect() {
-      if (ws && ws.readyState <= 1) return;
-      const path = window.location.pathname.replace(/\\/$/, "");
-      const base = path.endsWith("/console") ? path.slice(0, -8) : path;
-      const wsPath = (base === "" ? "" : base) + "/console/ws";
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       const token = tokenInput.value.trim();
       if (token) localStorage.setItem("ha_control_session", token);
       const query = token ? ("?token=" + encodeURIComponent(token)) : "";
       const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
-      ws = new WebSocket(proto + window.location.host + wsPath + query);
+      ws = new WebSocket(proto + window.location.host + wsPath() + query);
+
       ws.onopen = () => {
+        setStatus("Connected", true);
         term.writeln("\\r\\n[connected]");
         sendResize();
       };
-      ws.onclose = () => term.writeln("\\r\\n[disconnected]");
-      ws.onerror = () => term.writeln("\\r\\n[connection error]");
+      ws.onclose = () => {
+        setStatus("Disconnected", false);
+        term.writeln("\\r\\n[disconnected]");
+      };
+      ws.onerror = () => {
+        setStatus("Connection error", false);
+        term.writeln("\\r\\n[connection error]");
+      };
       ws.onmessage = (event) => {
         if (typeof event.data === "string") term.write(event.data);
       };
     }
 
-    document.getElementById("connect").addEventListener("click", connect);
-    window.addEventListener("resize", sendResize);
-    term.onData(data => {
-      if (!ws || ws.readyState !== 1) return;
-      ws.send(JSON.stringify({type: "input", data}));
+    function disconnect() {
+      if (ws) ws.close();
+      ws = null;
+    }
+
+    async function copySelection() {
+      const text = term.getSelection();
+      if (!text) return;
+      try { await navigator.clipboard.writeText(text); } catch (_) {}
+    }
+
+    async function pasteClipboard() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text) return;
+        send({ type: "input", data: text });
+      } catch (_) {}
+    }
+
+    function adjustFont(delta) {
+      fontSize = Math.max(10, Math.min(26, fontSize + delta));
+      localStorage.setItem("ha_console_font", String(fontSize));
+      term.options.fontSize = fontSize;
+      sendResize();
+    }
+
+    connectBtn.addEventListener("click", connect);
+    disconnectBtn.addEventListener("click", disconnect);
+    interruptBtn.addEventListener("click", () => send({ type: "input", data: "\\u0003" }));
+    clearBtn.addEventListener("click", () => term.clear());
+    copyBtn.addEventListener("click", copySelection);
+    pasteBtn.addEventListener("click", pasteClipboard);
+    fontDecBtn.addEventListener("click", () => adjustFont(-1));
+    fontIncBtn.addEventListener("click", () => adjustFont(1));
+
+    tokenInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") connect();
     });
+
+    term.onData((data) => send({ type: "input", data }));
+    term.attachCustomKeyEventHandler((event) => {
+      if (!event.ctrlKey || !event.shiftKey) return true;
+      if (event.key.toLowerCase() === "c") { copySelection(); return false; }
+      if (event.key.toLowerCase() === "v") { pasteClipboard(); return false; }
+      return true;
+    });
+    term.textarea?.addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text") || "";
+      if (text) send({ type: "input", data: text });
+      event.preventDefault();
+    });
+    window.addEventListener("resize", sendResize);
+
+    setStatus("Disconnected", false);
+    sendResize();
   </script>
 </body>
 </html>"""

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+- Redesigned web console UI with a modern terminal toolbar (connect/disconnect, copy, paste, clear, Ctrl+C, font sizing).
+- Improved copy/paste reliability and keyboard shortcuts (`Ctrl+Shift+C`, `Ctrl+Shift+V`).
+- Improved terminal sizing with FitAddon-based resizing for better interactive CLI behavior.
+
 ## 0.2.4
 
 - Fixed web console TUI behavior (including `codex`) by adding terminal resize support over WebSocket.

@@ -7,6 +7,7 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - Home Assistant panel via Ingress: open the add-on and click `Open Web UI`.
 - Console routes: `/` and `/console`.
 - WebSocket shell bridge: `/console/ws`.
+- Modern terminal toolbar with connect/disconnect, copy/paste, clear, Ctrl+C, and font-size controls.
 - Direct LAN access supports `Authorization: Bearer <session_token>` or `?token=<session_token>`.
 - `console_host_namespace: false` (default) runs console inside add-on container (recommended for `codex`).
 - `console_host_namespace: true` switches console to host shell via `nsenter`.
