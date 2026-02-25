@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Disabled AppArmor profile for this add-on (`apparmor: false`) to allow required host namespace operations (`nsenter`).
+
 ## 0.1.1
 
 - Switched to local build mode for custom repository installs (removed `image` field).
