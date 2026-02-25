@@ -19,3 +19,18 @@ configuration:
   supervisor_token:
     name: Supervisor token override
     description: Optional manual Supervisor API token override when runtime env token is unavailable.
+  cli_persistence_root:
+    name: CLI persistence root
+    description: Persistent root directory for CLI HOME, history, and user-installed tools.
+  cli_bootstrap_enabled:
+    name: Enable CLI bootstrap
+    description: Install missing CLI packages from bootstrap lists on add-on startup.
+  cli_bootstrap_npm_packages:
+    name: Bootstrap npm packages
+    description: npm packages to install persistently under the CLI runtime.
+  cli_bootstrap_pipx_packages:
+    name: Bootstrap pipx packages
+    description: Python CLI packages to install persistently via pipx.
+  cli_persist_history:
+    name: Persist shell history
+    description: Keep shell command history in persistent storage across restarts and updates.

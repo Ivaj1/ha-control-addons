@@ -35,6 +35,25 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
+def _to_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items: list[Any]
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+
+    result: list[str] = []
+    for item in raw_items:
+        normalized = str(item).strip()
+        if normalized:
+            result.append(normalized)
+    return result
+
+
 def _read_options() -> dict[str, Any]:
     if not OPTIONS_PATH.exists():
         return {}
@@ -84,6 +103,11 @@ class Settings:
     openai_api_key: str
     codex_home: str
     codex_seed_defaults: bool
+    cli_persistence_root: str
+    cli_bootstrap_enabled: bool
+    cli_bootstrap_npm_packages: list[str]
+    cli_bootstrap_pipx_packages: list[str]
+    cli_persist_history: bool
     webdav_enabled: bool
     webdav_username: str
     webdav_password: str
@@ -134,6 +158,23 @@ class Settings:
             codex_home=str(os.getenv("CODEX_HOME", options.get("codex_home", "/share/codex"))).strip(),
             codex_seed_defaults=_to_bool(
                 os.getenv("HACTRL_CODEX_SEED_DEFAULTS", options.get("codex_seed_defaults", True)),
+                True,
+            ),
+            cli_persistence_root=str(
+                os.getenv("HACTRL_CLI_PERSISTENCE_ROOT", options.get("cli_persistence_root", "/share/ha-control/cli"))
+            ).strip(),
+            cli_bootstrap_enabled=_to_bool(
+                os.getenv("HACTRL_CLI_BOOTSTRAP_ENABLED", options.get("cli_bootstrap_enabled", True)),
+                True,
+            ),
+            cli_bootstrap_npm_packages=_to_str_list(
+                os.getenv("HACTRL_CLI_BOOTSTRAP_NPM_PACKAGES", options.get("cli_bootstrap_npm_packages", []))
+            ),
+            cli_bootstrap_pipx_packages=_to_str_list(
+                os.getenv("HACTRL_CLI_BOOTSTRAP_PIPX_PACKAGES", options.get("cli_bootstrap_pipx_packages", []))
+            ),
+            cli_persist_history=_to_bool(
+                os.getenv("HACTRL_CLI_PERSIST_HISTORY", options.get("cli_persist_history", True)),
                 True,
             ),
             webdav_enabled=_to_bool(os.getenv("HACTRL_WEBDAV_ENABLED", options.get("webdav_enabled", True)), True),

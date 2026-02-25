@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse
 import httpx
 
 from .audit import write_audit_entry
+from .cli_persistence import CLIRuntimePaths, apply_cli_runtime_env, bootstrap_cli_tools, ensure_cli_runtime_layout
 from .codex_setup import ensure_codex_home
 from .config import settings
 from .filesystem import delete_path, move_path, read_file, tree, write_file
@@ -46,10 +47,12 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.13"
+AGENT_VERSION = "0.2.14"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
+cli_runtime: CLIRuntimePaths | None = None
+cli_bootstrap_status: dict[str, Any] = {}
 
 
 def _source_ip(request: Request) -> str:
@@ -243,7 +246,11 @@ class ConsoleSession:
     async def start(self) -> None:
         shell_cmd = _console_shell_cmd()
         cwd = settings.console_cwd if Path(settings.console_cwd).exists() else "/"
+        if cwd == "/" and cli_runtime and cli_runtime.home.exists():
+            cwd = str(cli_runtime.home)
         env = os.environ.copy()
+        if cli_runtime:
+            env = apply_cli_runtime_env(base_env=env, runtime=cli_runtime, persist_history=settings.cli_persist_history)
         if settings.openai_api_key:
             env["OPENAI_API_KEY"] = settings.openai_api_key
         env["CODEX_HOME"] = str(codex_runtime.get("codex_home", settings.codex_home))
@@ -591,13 +598,46 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "time": datetime.now(tz=UTC).isoformat(),
         "codex_home": str(codex_runtime.get("codex_home", settings.codex_home)),
+        "cli_root": str(cli_runtime.root if cli_runtime else settings.cli_persistence_root),
     }
 
 
 @app.on_event("startup")
 async def _startup_tasks() -> None:
     global codex_runtime
+    global cli_runtime
+    global cli_bootstrap_status
     codex_runtime = ensure_codex_home()
+    try:
+        cli_runtime = await asyncio.to_thread(
+            ensure_cli_runtime_layout,
+            root_value=settings.cli_persistence_root,
+            persist_history=settings.cli_persist_history,
+        )
+        cli_bootstrap_status = await asyncio.to_thread(
+            bootstrap_cli_tools,
+            runtime=cli_runtime,
+            enabled=settings.cli_bootstrap_enabled,
+            npm_packages=settings.cli_bootstrap_npm_packages,
+            pipx_packages=settings.cli_bootstrap_pipx_packages,
+            persist_history=settings.cli_persist_history,
+        )
+        write_audit_entry(
+            actor="system",
+            source_ip="127.0.0.1",
+            action="cli.bootstrap",
+            details=cli_bootstrap_status,
+            success=bool(cli_bootstrap_status.get("ok", True)),
+        )
+    except Exception as err:
+        cli_bootstrap_status = {"ok": False, "error": str(err)}
+        write_audit_entry(
+            actor="system",
+            source_ip="127.0.0.1",
+            action="cli.bootstrap",
+            details=cli_bootstrap_status,
+            success=False,
+        )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -880,6 +920,8 @@ async def capabilities(
             "dry_run_support": True,
             "web_console": True,
             "codex_cli": bool(shutil.which("codex")),
+            "cli_persistence": True,
+            "cli_bootstrap": bool(settings.cli_bootstrap_enabled),
         },
     }
     )

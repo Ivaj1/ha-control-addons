@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.14
+
+- Added persistent CLI runtime root configuration (`cli_persistence_root`, default `/share/ha-control/cli`).
+- Console sessions now run with persistent HOME/XDG/history environment so shell state survives restart/update.
+- Added managed CLI bootstrap options:
+  - `cli_bootstrap_enabled`
+  - `cli_bootstrap_npm_packages`
+  - `cli_bootstrap_pipx_packages`
+  - `cli_persist_history`
+- Added startup bootstrap status/manifest files under persistent CLI state.
+- Added `git` and `pipx` to runtime image to support persistent npm/pipx tool workflows.
+
 ## 0.2.13
 
 - Added optional HTTPS listener for WebDAV using stunnel and `/ssl` certs.

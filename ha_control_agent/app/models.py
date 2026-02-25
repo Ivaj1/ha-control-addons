@@ -90,6 +90,8 @@ class CapabilityFeatures(BaseModel):
     dry_run_support: bool
     web_console: bool = True
     codex_cli: bool = False
+    cli_persistence: bool = False
+    cli_bootstrap: bool = False
 
 
 class CapabilityModel(BaseModel):

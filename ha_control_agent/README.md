@@ -37,6 +37,18 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - `ha-control` CLI is bundled in the image and available directly in the add-on console.
 - On startup, `$codex_home/AGENTS.md` and `$codex_home/agent.md` are created to instruct Codex to use skills and Home Assistant context.
 
+## CLI Persistence
+
+- CLI runtime state is persisted under `cli_persistence_root` (default `/share/ha-control/cli`).
+- Persistent shell state includes HOME, history, XDG config/cache/data, and user bin paths.
+- Managed startup bootstrap can install missing CLI tools into persistent locations:
+  - `cli_bootstrap_npm_packages` (installed with npm global prefix under `/share`)
+  - `cli_bootstrap_pipx_packages` (installed with pipx home/bin under `/share`)
+- Useful options:
+  - `cli_bootstrap_enabled: true|false`
+  - `cli_persist_history: true|false`
+- Non-persistent by design: direct system package changes inside the container (for example `apk add ...` in an interactive shell).
+
 ## WebDAV (Windows Explorer)
 
 - Endpoint: `http://<HA_IP>:9123/webdav/`

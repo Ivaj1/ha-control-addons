@@ -34,6 +34,11 @@ High-privilege local control plane for Home Assistant OS.
 - `unsafe_allow_exec` (bool)
 - `unsafe_allow_special_paths` (bool)
 - `supervisor_token` (optional string fallback token)
+- `cli_persistence_root` (persistent CLI root, default `/share/ha-control/cli`)
+- `cli_bootstrap_enabled` (bool)
+- `cli_bootstrap_npm_packages` (list of npm package names to keep installed)
+- `cli_bootstrap_pipx_packages` (list of pipx package names to keep installed)
+- `cli_persist_history` (bool)
 
 ## Security warning
 
