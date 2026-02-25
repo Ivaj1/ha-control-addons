@@ -8,6 +8,8 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - Console routes: `/` and `/console`.
 - WebSocket shell bridge: `/console/ws`.
 - Direct LAN access supports `Authorization: Bearer <session_token>` or `?token=<session_token>`.
+- `console_host_namespace: false` (default) runs console inside add-on container (recommended for `codex`).
+- `console_host_namespace: true` switches console to host shell via `nsenter`.
 
 ## API surface
 

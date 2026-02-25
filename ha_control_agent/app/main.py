@@ -34,7 +34,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.0"
+AGENT_VERSION = "0.2.2"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 
@@ -134,7 +134,7 @@ def _console_subject_from_auth(
 def _console_shell_cmd() -> list[str]:
     shell = settings.console_shell or "/bin/sh"
     shell = shell if shell.startswith("/") else f"/bin/{shell}"
-    if Path("/proc/1/ns/mnt").exists() and shutil.which("nsenter"):
+    if settings.console_host_namespace and Path("/proc/1/ns/mnt").exists() and shutil.which("nsenter"):
         return [
             "nsenter",
             "--target", "1",

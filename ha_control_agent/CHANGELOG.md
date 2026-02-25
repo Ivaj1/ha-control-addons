@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Fixed console behavior for Codex CLI: default console now runs in add-on container namespace, where `codex` is installed.
+- Added `console_host_namespace` option (`false` by default). Set `true` only when you explicitly want host shell.
+
 ## 0.2.1
 
 - Fixed add-on `build.yaml` image references to fully-qualified names required by Supervisor validation.

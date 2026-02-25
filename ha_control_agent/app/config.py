@@ -84,6 +84,7 @@ class Settings:
     openai_api_key: str
     console_shell: str
     console_cwd: str
+    console_host_namespace: bool
     audit_log_path: Path
     backup_root: Path
 
@@ -120,6 +121,10 @@ class Settings:
             openai_api_key=str(os.getenv("OPENAI_API_KEY", options.get("openai_api_key", ""))).strip(),
             console_shell=str(os.getenv("HACTRL_CONSOLE_SHELL", options.get("console_shell", "/bin/sh"))).strip(),
             console_cwd=str(os.getenv("HACTRL_CONSOLE_CWD", options.get("console_cwd", "/homeassistant"))).strip(),
+            console_host_namespace=_to_bool(
+                os.getenv("HACTRL_CONSOLE_HOST_NAMESPACE", options.get("console_host_namespace", False)),
+                False,
+            ),
             audit_log_path=Path(os.getenv("HACTRL_AUDIT_LOG", "/share/ha-control/audit.log")),
             backup_root=Path(os.getenv("HACTRL_BACKUP_ROOT", "/backup/ha-control")),
         )
