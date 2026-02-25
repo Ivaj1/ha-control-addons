@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Fixed build failure on Home Assistant base image by using `pip3`/`python3`.
+- Restored official Home Assistant base images in `build.yaml`/`Dockerfile` for consistent Supervisor local builds.
+
 ## 0.1.8
 
 - Switched add-on runtime base image to `python:3.12-alpine` (no s6 overlay), avoiding `s6-overlay-suexec: can only run as pid 1` when `host_pid: true` + `protected: false`.
