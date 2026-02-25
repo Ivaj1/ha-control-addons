@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed add-on `build.yaml` image references to fully-qualified names required by Supervisor validation.
+
 ## 0.2.0
 
 - Added Home Assistant Ingress panel (`ingress: true`) with embedded web console at `/` and `/console`.
