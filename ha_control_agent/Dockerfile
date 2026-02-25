@@ -15,6 +15,8 @@ RUN pip install -r requirements.txt
 
 COPY app ./app
 COPY default_skills ./default_skills
+COPY ha_control_cli_bundle ./ha_control_cli_bundle
+RUN pip install ./ha_control_cli_bundle
 
 EXPOSE 9123
 

@@ -1,0 +1,1 @@
+"""ha-control CLI package."""

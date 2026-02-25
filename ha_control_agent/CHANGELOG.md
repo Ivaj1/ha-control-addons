@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6
+
+- Bundled and installed `ha-control-cli` inside the add-on image.
+- `ha-control` command is now available directly in the web console shell.
+
 ## 0.2.5
 
 - Redesigned web console UI with a modern terminal toolbar (connect/disconnect, copy, paste, clear, Ctrl+C, font sizing).
