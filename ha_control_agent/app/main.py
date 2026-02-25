@@ -44,7 +44,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.9"
+AGENT_VERSION = "0.2.10"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
@@ -130,7 +130,7 @@ CONSOLE_HTML = """<!doctype html>
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById("term"));
-    term.writeln("HA Control Agent console ready. Shortcuts: Ctrl+Shift+C/V, Ctrl+Shift+X (interrupt), Ctrl+Shift+L (clear).");
+    term.writeln("HA Control Agent console ready.");
 
     function setStatus(message, connected) {
       statusEl.textContent = message;
@@ -186,48 +186,11 @@ CONSOLE_HTML = """<!doctype html>
       ws = null;
     }
 
-    async function copySelection() {
-      const text = term.getSelection();
-      if (!text) return;
-      try { await navigator.clipboard.writeText(text); } catch (_) {}
-    }
-
-    async function pasteClipboard() {
-      try {
-        const text = await navigator.clipboard.readText();
-        if (!text) return;
-        send({ type: "input", data: text });
-      } catch (_) {}
-    }
-
-    function adjustFont(delta) {
-      fontSize = Math.max(10, Math.min(26, fontSize + delta));
-      localStorage.setItem("ha_console_font", String(fontSize));
-      term.options.fontSize = fontSize;
-      sendResize();
-    }
-
     statusEl.addEventListener("click", () => {
       if (ws && ws.readyState === 1) disconnect(); else connect();
     });
 
     term.onData((data) => send({ type: "input", data }));
-    term.attachCustomKeyEventHandler((event) => {
-      if (!event.ctrlKey || !event.shiftKey) return true;
-      if (event.key.toLowerCase() === "c") { copySelection(); return false; }
-      if (event.key.toLowerCase() === "v") { pasteClipboard(); return false; }
-      if (event.key.toLowerCase() === "x") { send({ type: "input", data: "\\u0003" }); return false; }
-      if (event.key.toLowerCase() === "l") { term.clear(); return false; }
-      if (event.key === "+") { adjustFont(1); return false; }
-      if (event.key === "_") { adjustFont(-1); return false; }
-      if (event.key.toLowerCase() === "r") { connect(); return false; }
-      return true;
-    });
-    term.textarea?.addEventListener("paste", (event) => {
-      const text = event.clipboardData?.getData("text") || "";
-      if (text) send({ type: "input", data: text });
-      event.preventDefault();
-    });
     window.addEventListener("resize", sendResize);
 
     setStatus("Disconnected", false);

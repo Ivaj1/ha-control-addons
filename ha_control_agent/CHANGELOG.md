@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.9
+## 0.2.10
 
 - Added optional HTTPS listener for WebDAV using stunnel and `/ssl` certs.
 - Added HTTPS options: `webdav_https_enabled`, `webdav_https_port`, `webdav_https_cert`, `webdav_https_key`.
@@ -8,6 +8,7 @@
 - Updated console UI to a Windows-like terminal style (Cascadia/Consolas theme and palette).
 - Simplified console to a minimal top bar and keyboard-driven controls.
 - Hid visible scrollbar rail in terminal viewport for cleaner look.
+- Removed custom clipboard/shortcut interception to behave like a normal terminal session.
 
 ## 0.2.7
 
