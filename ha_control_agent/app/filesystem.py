@@ -13,6 +13,46 @@ from .config import settings
 from .fastapi_compat import HTTPException, status
 from .host_exec import run_simple_host_command
 
+_HOST_PATH_MAP: tuple[tuple[str, str], ...] = (
+    ("/mnt/data/supervisor/homeassistant", "/homeassistant"),
+    ("/mnt/data/supervisor/addons", "/addons"),
+    ("/mnt/data/supervisor/addon_configs", "/addon_configs"),
+    ("/mnt/data/supervisor/backup", "/backup"),
+    ("/mnt/data/supervisor/media", "/media"),
+    ("/mnt/data/supervisor/share", "/share"),
+    ("/mnt/data/supervisor/ssl", "/ssl"),
+    ("/addons", "/addons"),
+    ("/addon_configs", "/addon_configs"),
+    ("/backup", "/backup"),
+    ("/media", "/media"),
+    ("/share", "/share"),
+    ("/ssl", "/ssl"),
+    ("/homeassistant", "/homeassistant"),
+)
+
+
+def _is_nsenter_permission_error(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return "operation not permitted" in lowered or "reassociate to namespaces failed" in lowered
+
+
+def _map_host_to_container(path: str) -> tuple[str, str, str] | None:
+    for host_prefix, container_prefix in _HOST_PATH_MAP:
+        if path == host_prefix:
+            return host_prefix, container_prefix, container_prefix
+        if path.startswith(host_prefix + "/"):
+            suffix = path[len(host_prefix) :]
+            return host_prefix, container_prefix, f"{container_prefix}{suffix}"
+    return None
+
+
+def _map_container_to_host(path: str, *, host_prefix: str, container_prefix: str) -> str:
+    if path == container_prefix:
+        return host_prefix
+    if path.startswith(container_prefix + "/"):
+        return f"{host_prefix}{path[len(container_prefix):]}"
+    return path
+
 
 def _deny_special_path(path: str, *, host_namespace: bool) -> None:
     if not host_namespace or settings.unsafe_allow_special_paths:
@@ -107,10 +147,17 @@ def read_file(path: str, *, host_namespace: bool) -> dict[str, Any]:
     if host_namespace:
         result = run_simple_host_command(["cat", path], timeout_s=30)
         if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            mapped = _map_host_to_container(path)
+            if mapped and _is_nsenter_permission_error(stderr):
+                _host_prefix, _container_prefix, mapped_path = mapped
+                result_local = read_file(path=mapped_path, host_namespace=False)
+                result_local["path"] = path
+                result_local["fallback_mode"] = "mapped_local"
+                return result_local
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result.stderr.decode("utf-8", errors="replace")
-                or "Failed to read file",
+                detail=stderr or "Failed to read file",
             )
         content = result.stdout
     else:
@@ -164,8 +211,23 @@ def write_file(
         }
 
     if host_namespace:
+        mapped = _map_host_to_container(path)
         if create_dirs:
-            run_simple_host_command(["mkdir", "-p", str(target.parent)], timeout_s=30)
+            mkdir = run_simple_host_command(["mkdir", "-p", str(target.parent)], timeout_s=30)
+            if mkdir.returncode != 0 and mapped and _is_nsenter_permission_error(
+                mkdir.stderr.decode("utf-8", errors="replace")
+            ):
+                _host_prefix, _container_prefix, mapped_path = mapped
+                result_local = write_file(
+                    path=mapped_path,
+                    content=content,
+                    mode=mode,
+                    create_dirs=create_dirs,
+                    host_namespace=False,
+                )
+                result_local["path"] = path
+                result_local["fallback_mode"] = "mapped_local"
+                return result_local
 
         backup_path = _backup_host_path(path)
 
@@ -175,10 +237,22 @@ def write_file(
             stdin=payload,
         )
         if write.returncode != 0:
+            stderr = write.stderr.decode("utf-8", errors="replace")
+            if mapped and _is_nsenter_permission_error(stderr):
+                _host_prefix, _container_prefix, mapped_path = mapped
+                result_local = write_file(
+                    path=mapped_path,
+                    content=content,
+                    mode=mode,
+                    create_dirs=create_dirs,
+                    host_namespace=False,
+                )
+                result_local["path"] = path
+                result_local["fallback_mode"] = "mapped_local"
+                return result_local
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=write.stderr.decode("utf-8", errors="replace")
-                or "Failed to write file",
+                detail=stderr or "Failed to write file",
             )
 
         if mode:
@@ -229,12 +303,27 @@ def move_path(*, src: str, dst: str, host_namespace: bool) -> dict[str, Any]:
     src_before_hash = _hash_host_file(src) if host_namespace else _hash_local_file(src_path)
 
     if host_namespace:
+        mapped_src = _map_host_to_container(src)
+        mapped_dst = _map_host_to_container(dst)
         backup_path = _backup_host_path(src)
         move = run_simple_host_command(["mv", src, dst], timeout_s=30)
         if move.returncode != 0:
+            stderr = move.stderr.decode("utf-8", errors="replace")
+            if mapped_src and mapped_dst and _is_nsenter_permission_error(stderr):
+                _src_host_prefix, _src_container_prefix, mapped_src_path = mapped_src
+                _dst_host_prefix, _dst_container_prefix, mapped_dst_path = mapped_dst
+                result_local = move_path(
+                    src=mapped_src_path,
+                    dst=mapped_dst_path,
+                    host_namespace=False,
+                )
+                result_local["src"] = src
+                result_local["dst"] = dst
+                result_local["fallback_mode"] = "mapped_local"
+                return result_local
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=move.stderr.decode("utf-8", errors="replace") or "Move failed",
+                detail=stderr or "Move failed",
             )
         dst_after_hash = _hash_host_file(dst)
     else:
@@ -267,13 +356,20 @@ def delete_path(*, path: str, recursive: bool, host_namespace: bool) -> dict[str
     backup_path = _backup_host_path(path) if host_namespace else _backup_local_path(target)
 
     if host_namespace:
+        mapped = _map_host_to_container(path)
         argv = ["rm", "-rf", path] if recursive else ["rm", "-f", path]
         delete = run_simple_host_command(argv, timeout_s=30)
         if delete.returncode != 0:
+            stderr = delete.stderr.decode("utf-8", errors="replace")
+            if mapped and _is_nsenter_permission_error(stderr):
+                _host_prefix, _container_prefix, mapped_path = mapped
+                result_local = delete_path(path=mapped_path, recursive=recursive, host_namespace=False)
+                result_local["path"] = path
+                result_local["fallback_mode"] = "mapped_local"
+                return result_local
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=delete.stderr.decode("utf-8", errors="replace")
-                or "Delete failed",
+                detail=stderr or "Delete failed",
             )
     else:
         try:
@@ -309,15 +405,32 @@ def tree(*, path: str, max_depth: int, host_namespace: bool) -> dict[str, Any]:
         )
 
     if host_namespace:
+        mapped = _map_host_to_container(path)
         result = run_simple_host_command(
             ["find", path, "-maxdepth", str(max_depth), "-print"],
             timeout_s=60,
         )
         if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            if mapped and _is_nsenter_permission_error(stderr):
+                host_prefix, container_prefix, mapped_path = mapped
+                local_result = tree(path=mapped_path, max_depth=max_depth, host_namespace=False)
+                rewritten_entries = []
+                for entry in local_result["entries"]:
+                    rewritten_entries.append(
+                        {
+                            "path": _map_container_to_host(
+                                entry["path"],
+                                host_prefix=host_prefix,
+                                container_prefix=container_prefix,
+                            ),
+                            "type": entry["type"],
+                        }
+                    )
+                return {"root": path, "entries": rewritten_entries, "fallback_mode": "mapped_local"}
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result.stderr.decode("utf-8", errors="replace")
-                or "find failed",
+                detail=stderr or "find failed",
             )
 
         paths = [

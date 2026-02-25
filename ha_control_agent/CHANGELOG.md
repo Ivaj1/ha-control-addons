@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Added additional Linux capabilities (`SYS_PTRACE`, `DAC_READ_SEARCH`) for host namespace control in `protected: false` mode.
+- Reduced `nsenter` namespaces to mount+pid for better compatibility.
+- Added filesystem fallback: if `nsenter` is blocked, operations automatically fall back to mapped mounted paths (`/homeassistant`, `/addons`, `/share`, `/backup`, `/media`, `/ssl`, `/addon_configs`).
+
 ## 0.1.11
 
 - Switched runtime image to `python:3.12-alpine` without s6 overlay, eliminating `s6-overlay-suexec: can only run as pid 1` when running with `host_pid: true` and `protected: false`.

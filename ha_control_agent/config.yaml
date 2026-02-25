@@ -1,7 +1,7 @@
 name: HA Control Agent
 slug: ha_control_agent
 description: Full-control LAN agent for Home Assistant OS (host, Supervisor, Core, filesystem, and CLI orchestration)
-version: 0.1.11
+version: 0.1.12
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent
 startup: services
 boot: manual
@@ -19,6 +19,8 @@ host_pid: true
 host_dbus: true
 privileged:
   - SYS_ADMIN
+  - SYS_PTRACE
+  - DAC_READ_SEARCH
 full_access: true
 protected: false
 map:

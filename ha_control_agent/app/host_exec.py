@@ -16,9 +16,6 @@ _NSENTER_PREFIX = [
     "--target",
     "1",
     "--mount",
-    "--uts",
-    "--ipc",
-    "--net",
     "--pid",
     "--",
 ]
