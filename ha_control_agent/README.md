@@ -41,13 +41,14 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 
 - CLI runtime state is persisted under `cli_persistence_root` (default `/share/ha-control/cli`).
 - Persistent shell state includes HOME, history, XDG config/cache/data, and user bin paths.
+- `apk add` / `apk del` in the CLI console are tracked automatically and restored on startup (no manual package list required).
 - Managed startup bootstrap can install missing CLI tools into persistent locations:
   - `cli_bootstrap_npm_packages` (installed with npm global prefix under `/share`)
   - `cli_bootstrap_pipx_packages` (installed with pipx home/bin under `/share`)
 - Useful options:
   - `cli_bootstrap_enabled: true|false`
   - `cli_persist_history: true|false`
-- Non-persistent by design: direct system package changes inside the container (for example `apk add ...` in an interactive shell).
+- Note: automatic apk tracking only applies to commands run through the add-on console environment (where the managed wrapper is active).
 
 ## WebDAV (Windows Explorer)
 

@@ -40,6 +40,11 @@ High-privilege local control plane for Home Assistant OS.
 - `cli_bootstrap_pipx_packages` (list of pipx package names to keep installed)
 - `cli_persist_history` (bool)
 
+### Automatic apk persistence
+
+- `apk add` and `apk del` executed from the add-on console are tracked automatically in persistent state.
+- On startup/update, tracked apk packages are restored automatically if missing.
+
 ## Security warning
 
 This add-on is intentionally high privilege (`full_access: true`, `protected: false`).

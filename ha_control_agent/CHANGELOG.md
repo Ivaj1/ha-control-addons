@@ -9,6 +9,7 @@
   - `cli_bootstrap_npm_packages`
   - `cli_bootstrap_pipx_packages`
   - `cli_persist_history`
+- Added automatic `apk add`/`apk del` tracking in console sessions with startup restore of tracked packages.
 - Added startup bootstrap status/manifest files under persistent CLI state.
 - Added `git` and `pipx` to runtime image to support persistent npm/pipx tool workflows.
 

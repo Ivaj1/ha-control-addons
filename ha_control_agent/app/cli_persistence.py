@@ -33,6 +33,8 @@ class CLIRuntimePaths:
     bootstrap_status_file: Path
     bootstrap_manifest_file: Path
     bootstrap_lock_file: Path
+    apk_state_file: Path
+    apk_wrapper_file: Path
     migration_marker: Path
 
     def as_dict(self) -> dict[str, str]:
@@ -45,6 +47,8 @@ class CLIRuntimePaths:
             "cli_pipx_home": str(self.pipx_home),
             "cli_pipx_bin_dir": str(self.pipx_bin_dir),
             "cli_history_file": str(self.history_file),
+            "cli_apk_state_file": str(self.apk_state_file),
+            "cli_apk_wrapper_file": str(self.apk_wrapper_file),
         }
 
 
@@ -92,6 +96,8 @@ def _build_paths(root: Path) -> CLIRuntimePaths:
         bootstrap_status_file=state / "bootstrap-status.json",
         bootstrap_manifest_file=state / "bootstrap-manifest.json",
         bootstrap_lock_file=state / "bootstrap-tools.lock",
+        apk_state_file=state / "apk-packages.txt",
+        apk_wrapper_file=(root / "bin" / "apk"),
         migration_marker=state / "migrations" / f".migrated_v{MIGRATION_VERSION}",
     )
 
@@ -106,6 +112,13 @@ def _write_if_missing(path: Path, content: str) -> None:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    current_mode = path.stat().st_mode
+    path.chmod(current_mode | 0o111)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -128,6 +141,109 @@ def _normalize_package_list(packages: list[str]) -> list[str]:
         seen.add(value)
         normalized.append(value)
     return normalized
+
+
+def _apk_presence_key(spec: str) -> str:
+    value = spec.strip()
+    stop_tokens = ("<", ">", "=", "~", "!", "@", " ")
+    index = len(value)
+    for token in stop_tokens:
+        pos = value.find(token)
+        if pos != -1 and pos < index:
+            index = pos
+    key = value[:index].strip()
+    return key or value
+
+
+def _build_apk_wrapper(state_file: Path) -> str:
+    escaped_state = str(state_file).replace('"', '\\"')
+    return (
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "\n"
+        'REAL_APK="/sbin/apk"\n'
+        f'STATE_FILE="${{HACTRL_APK_STATE_FILE:-{escaped_state}}}"\n'
+        "\n"
+        "ensure_state_file() {\n"
+        '  state_dir="$(dirname "$STATE_FILE")"\n'
+        '  mkdir -p "$state_dir"\n'
+        '  [ -f "$STATE_FILE" ] || : > "$STATE_FILE"\n'
+        "}\n"
+        "\n"
+        "collect_packages() {\n"
+        "  expect_value=0\n"
+        "  for arg in \"$@\"; do\n"
+        "    if [ \"$expect_value\" -eq 1 ]; then\n"
+        "      expect_value=0\n"
+        "      continue\n"
+        "    fi\n"
+        "    case \"$arg\" in\n"
+        "      --virtual|-t|--repository|--repositories-file|--root|--keys-dir|--cache-dir|--wait|--timeout|--arch|--allow-untrusted)\n"
+        "        expect_value=1\n"
+        "        ;;\n"
+        "      --*=*)\n"
+        "        ;;\n"
+        "      -*)\n"
+        "        ;;\n"
+        "      *)\n"
+        "        printf '%s\\n' \"$arg\"\n"
+        "        ;;\n"
+        "    esac\n"
+        "  done\n"
+        "}\n"
+        "\n"
+        "update_state_add() {\n"
+        "  ensure_state_file\n"
+        '  tmp="${STATE_FILE}.tmp.$$"\n'
+        '  cp "$STATE_FILE" "$tmp" 2>/dev/null || : > "$tmp"\n'
+        "  while IFS= read -r pkg; do\n"
+        "    [ -n \"$pkg\" ] || continue\n"
+        "    if ! grep -qxF \"$pkg\" \"$tmp\" 2>/dev/null; then\n"
+        "      printf '%s\\n' \"$pkg\" >> \"$tmp\"\n"
+        "    fi\n"
+        "  done\n"
+        "  sort -u \"$tmp\" > \"$STATE_FILE\"\n"
+        '  rm -f "$tmp"\n'
+        "}\n"
+        "\n"
+        "update_state_del() {\n"
+        "  ensure_state_file\n"
+        '  tmp="${STATE_FILE}.tmp.$$"\n'
+        '  cp "$STATE_FILE" "$tmp" 2>/dev/null || : > "$tmp"\n'
+        "  while IFS= read -r pkg; do\n"
+        "    [ -n \"$pkg\" ] || continue\n"
+        '    grep -vxF "$pkg" "$tmp" > "${tmp}.next" 2>/dev/null || true\n'
+        '    mv "${tmp}.next" "$tmp"\n'
+        "  done\n"
+        "  sort -u \"$tmp\" > \"$STATE_FILE\"\n"
+        '  rm -f "$tmp"\n'
+        "}\n"
+        "\n"
+        'sub="${1:-}"\n'
+        "case \"$sub\" in\n"
+        "  add)\n"
+        '    "$REAL_APK" "$@"\n'
+        '    rc="$?"\n'
+        "    if [ \"$rc\" -eq 0 ]; then\n"
+        "      shift\n"
+        "      collect_packages \"$@\" | update_state_add\n"
+        "    fi\n"
+        '    exit "$rc"\n'
+        "    ;;\n"
+        "  del)\n"
+        '    "$REAL_APK" "$@"\n'
+        '    rc="$?"\n'
+        "    if [ \"$rc\" -eq 0 ]; then\n"
+        "      shift\n"
+        "      collect_packages \"$@\" | update_state_del\n"
+        "    fi\n"
+        '    exit "$rc"\n'
+        "    ;;\n"
+        "  *)\n"
+        '    exec "$REAL_APK" "$@"\n'
+        "    ;;\n"
+        "esac\n"
+    )
 
 
 def _npm_presence_key(spec: str) -> str:
@@ -201,6 +317,8 @@ def ensure_cli_runtime_layout(*, root_value: str, persist_history: bool) -> CLIR
             'PROMPT_COMMAND="history -a;${PROMPT_COMMAND:-:}"\n'
         ),
     )
+    _write_if_missing(runtime.apk_state_file, "")
+    _write_executable(runtime.apk_wrapper_file, _build_apk_wrapper(runtime.apk_state_file))
     _write_if_missing(runtime.bootstrap_lock_file, "")
     _write_if_missing(runtime.migration_marker, _now_iso() + "\n")
     return runtime
@@ -221,6 +339,7 @@ def apply_cli_runtime_env(
     env["NPM_CONFIG_PREFIX"] = str(runtime.npm_prefix)
     env["PIPX_HOME"] = str(runtime.pipx_home)
     env["PIPX_BIN_DIR"] = str(runtime.pipx_bin_dir)
+    env["HACTRL_APK_STATE_FILE"] = str(runtime.apk_state_file)
     if persist_history:
         env["HISTFILE"] = str(runtime.history_file)
 
@@ -287,6 +406,34 @@ def _pipx_installed_packages(runtime: CLIRuntimePaths, env: dict[str, str]) -> s
     return set(venvs.keys()) if isinstance(venvs, dict) else set()
 
 
+def _read_apk_state(runtime: CLIRuntimePaths) -> list[str]:
+    if not runtime.apk_state_file.exists():
+        return []
+    packages: list[str] = []
+    seen: set[str] = set()
+    try:
+        lines = runtime.apk_state_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        value = line.strip()
+        if not value or value.startswith("#") or value in seen:
+            continue
+        seen.add(value)
+        packages.append(value)
+    return packages
+
+
+def _missing_apk_packages(packages: list[str], env: dict[str, str]) -> list[str]:
+    missing: list[str] = []
+    for spec in packages:
+        key = _apk_presence_key(spec)
+        code, _stdout, _stderr = _run_cmd(["/sbin/apk", "info", "-e", key], env=env, timeout_s=30)
+        if code != 0:
+            missing.append(spec)
+    return missing
+
+
 def bootstrap_cli_tools(
     *,
     runtime: CLIRuntimePaths,
@@ -295,9 +442,11 @@ def bootstrap_cli_tools(
     pipx_packages: list[str],
     persist_history: bool,
 ) -> dict[str, Any]:
+    tracked_apk_packages = _read_apk_state(runtime)
     manifest = {
         "generated_at": _now_iso(),
         "enabled": enabled,
+        "apk_packages_tracked": tracked_apk_packages,
         "npm_packages": _normalize_package_list(npm_packages),
         "pipx_packages": _normalize_package_list(pipx_packages),
     }
@@ -309,6 +458,7 @@ def bootstrap_cli_tools(
         "ok": True,
         "root": str(runtime.root),
         "persist_history": persist_history,
+        "apk": {"tracked": tracked_apk_packages, "installed": [], "failed": []},
         "npm": {"requested": manifest["npm_packages"], "installed": [], "failed": []},
         "pipx": {"requested": manifest["pipx_packages"], "installed": [], "failed": []},
     }
@@ -317,6 +467,16 @@ def bootstrap_cli_tools(
         return status
 
     env = apply_cli_runtime_env(base_env=os.environ.copy(), runtime=runtime, persist_history=persist_history)
+
+    if tracked_apk_packages:
+        missing_apk = _missing_apk_packages(tracked_apk_packages, env)
+        if missing_apk:
+            code, _stdout, stderr = _run_cmd(["/sbin/apk", "add", "--no-cache", *missing_apk], env=env, timeout_s=1800)
+            if code == 0:
+                status["apk"]["installed"].extend(missing_apk)
+            else:
+                status["ok"] = False
+                status["apk"]["failed"].append({"packages": missing_apk, "error": stderr.strip()[:500]})
 
     if manifest["npm_packages"]:
         installed = _npm_installed_packages(runtime, env)
@@ -355,6 +515,7 @@ def bootstrap_cli_tools(
     lock_lines = [
         f"timestamp={_now_iso()}",
         f"ok={status['ok']}",
+        f"apk_tracked={','.join(tracked_apk_packages)}",
         f"npm_requested={','.join(manifest['npm_packages'])}",
         f"pipx_requested={','.join(manifest['pipx_packages'])}",
     ]
