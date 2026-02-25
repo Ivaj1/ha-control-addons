@@ -19,16 +19,13 @@ CONFIG="$DST_DIR/config.yaml"
 
 # Keep add-on repository metadata stable after source sync.
 if grep -q '^url:' "$CONFIG"; then
-  sed -i 's|^url:.*$|url: https://github.com/ivaj/ha-control-addons/tree/main/ha_control_agent|' "$CONFIG"
+  sed -i 's|^url:.*$|url: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent|' "$CONFIG"
 else
-  printf '\nurl: https://github.com/ivaj/ha-control-addons/tree/main/ha_control_agent\n' >> "$CONFIG"
+  printf '\nurl: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent\n' >> "$CONFIG"
 fi
 
-if grep -q '^image:' "$CONFIG"; then
-  sed -i 's|^image:.*$|image: ghcr.io/ivaj/{arch}-addon-ha-control-agent|' "$CONFIG"
-else
-  sed -i '/^version:/a image: ghcr.io/ivaj/{arch}-addon-ha-control-agent' "$CONFIG"
-fi
+# Custom repository mode: force local build by removing any pinned image.
+sed -i '/^image:/d' "$CONFIG"
 
 echo "Synced HA Control Agent from: $SRC_DIR"
 echo "Into add-on repo path: $DST_DIR"

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Switched to local build mode for custom repository installs (removed `image` field).
+- Updated add-on URL metadata to `Ivaj1/ha-control-addons`.
+
 ## 0.1.0
 
 - Initial release.

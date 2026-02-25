@@ -13,7 +13,7 @@ Privileged API agent for full CLI control of Home Assistant OS.
 1. Open `Settings` -> `Add-ons` -> `Add-on Store`.
 2. Open the menu (top-right) -> `Repositories`.
 3. Add this repository URL:
-   - `https://github.com/ivaj/ha-control-addons`
+   - `https://github.com/Ivaj1/ha-control-addons`
 4. Install **HA Control Agent**.
 5. Start the add-on and check `http://<ha-ip>:9123/health`.
 
