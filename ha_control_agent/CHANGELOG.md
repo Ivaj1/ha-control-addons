@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.9
+
+- Added optional HTTPS listener for WebDAV using stunnel and `/ssl` certs.
+- Added HTTPS options: `webdav_https_enabled`, `webdav_https_port`, `webdav_https_cert`, `webdav_https_key`.
+- Keeps existing HTTP API/console on `9123` while enabling TLS WebDAV compatibility path for Windows.
+- Updated console UI to a Windows-like terminal style (Cascadia/Consolas theme and palette).
+- Simplified console to a minimal top bar and keyboard-driven controls.
+- Hid visible scrollbar rail in terminal viewport for cleaner look.
+
 ## 0.2.7
 
 - Added WebDAV server endpoints under `/webdav` for Windows Explorer-style file browsing/editing.

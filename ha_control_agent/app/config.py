@@ -89,6 +89,10 @@ class Settings:
     webdav_root: str
     webdav_host_namespace: bool
     webdav_read_only: bool
+    webdav_https_enabled: bool
+    webdav_https_port: int
+    webdav_https_cert: str
+    webdav_https_key: str
     console_shell: str
     console_cwd: str
     console_host_namespace: bool
@@ -139,6 +143,20 @@ class Settings:
                 os.getenv("HACTRL_WEBDAV_READ_ONLY", options.get("webdav_read_only", False)),
                 False,
             ),
+            webdav_https_enabled=_to_bool(
+                os.getenv("HACTRL_WEBDAV_HTTPS_ENABLED", options.get("webdav_https_enabled", False)),
+                False,
+            ),
+            webdav_https_port=_to_int(
+                os.getenv("HACTRL_WEBDAV_HTTPS_PORT", options.get("webdav_https_port", 9443)),
+                9443,
+            ),
+            webdav_https_cert=str(
+                os.getenv("HACTRL_WEBDAV_HTTPS_CERT", options.get("webdav_https_cert", "/ssl/fullchain.pem"))
+            ).strip(),
+            webdav_https_key=str(
+                os.getenv("HACTRL_WEBDAV_HTTPS_KEY", options.get("webdav_https_key", "/ssl/privkey.pem"))
+            ).strip(),
             console_shell=str(os.getenv("HACTRL_CONSOLE_SHELL", options.get("console_shell", "/bin/sh"))).strip(),
             console_cwd=str(os.getenv("HACTRL_CONSOLE_CWD", options.get("console_cwd", "/homeassistant"))).strip(),
             console_host_namespace=_to_bool(

@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apk add --no-cache util-linux bash coreutils findutils
 RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache stunnel
 RUN npm install -g --unsafe-perm @openai/codex
 
 WORKDIR /app
@@ -16,8 +17,9 @@ RUN pip install -r requirements.txt
 COPY app ./app
 COPY default_skills ./default_skills
 COPY ha_control_cli_bundle ./ha_control_cli_bundle
+COPY launcher.py ./launcher.py
 RUN pip install ./ha_control_cli_bundle
 
 EXPOSE 9123
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9123"]
+CMD ["python", "launcher.py"]

@@ -44,7 +44,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.7"
+AGENT_VERSION = "0.2.9"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
@@ -72,53 +72,33 @@ CONSOLE_HTML = """<!doctype html>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
   <style>
     :root {
-      --bg: #0b1016;
-      --panel: #121a24;
-      --line: #223041;
-      --text: #d8e0ea;
-      --muted: #8ea0b4;
-      --accent: #2f81f7;
-      --accent-2: #1f6feb;
+      --bg: #0c0f14;
+      --panel: #151a20;
+      --line: #2b323d;
+      --text: #e8edf3;
+      --muted: #9aa4b2;
+      --accent: #0078d4;
+      --accent-2: #006cbe;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: radial-gradient(1200px 700px at 10% -20%, #1a2a3d 0, var(--bg) 50%); color: var(--text); font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .app { height: 100%; display: grid; grid-template-rows: auto auto 1fr; }
-    .topbar { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #182333 0%, #121a24 100%); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    html, body { height: 100%; margin: 0; background: linear-gradient(180deg, #131821 0, var(--bg) 45%); color: var(--text); font-family: "Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    .topbar { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #202833 0%, #171d25 100%); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
     .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2px; }
     .title small { color: var(--muted); font-weight: 500; margin-left: 8px; }
-    .status { font-size: 12px; color: #7ee787; border: 1px solid #294733; background: #0f1d14; padding: 4px 8px; border-radius: 999px; }
-    .toolbar { border-bottom: 1px solid var(--line); background: #101823; padding: 8px 10px; display: grid; gap: 8px; grid-template-columns: 1fr auto; align-items: center; }
-    .left, .right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .token { width: min(520px, 100%); background: #0c131d; border: 1px solid #2e3b4d; color: var(--text); padding: 7px 10px; border-radius: 6px; }
-    .btn { border: 1px solid #35465c; background: #172233; color: var(--text); border-radius: 6px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; }
-    .btn:hover { border-color: #4c6380; background: #1b2a3e; }
-    .btn.primary { border-color: #2f6ed3; background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #fff; }
-    .hint { font-size: 11px; color: var(--muted); }
+    .status { font-size: 12px; color: #d3e8ff; border: 1px solid #1f3f5b; background: #12253a; padding: 4px 8px; border-radius: 999px; }
+    .status:hover { filter: brightness(1.08); cursor: pointer; }
     .terminal-wrap { padding: 10px; height: 100%; min-height: 0; }
     #term { width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.35); }
+    #term .xterm-viewport { scrollbar-width: none; background: transparent !important; }
+    #term .xterm-viewport::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
   </style>
 </head>
 <body>
   <div class="app">
     <div class="topbar">
-      <div class="title">HA Control Console <small>Modern terminal</small></div>
+      <div class="title">HA Control Console <small>Windows style minimal</small></div>
       <div id="status" class="status">Disconnected</div>
-    </div>
-    <div class="toolbar">
-      <div class="left">
-        <input id="token" class="token" placeholder="Session token (optional in Ingress)" />
-        <button id="connect" class="btn primary">Connect</button>
-        <button id="disconnect" class="btn">Disconnect</button>
-        <button id="interrupt" class="btn">Ctrl+C</button>
-        <button id="clear" class="btn">Clear</button>
-      </div>
-      <div class="right">
-        <button id="copy" class="btn">Copy</button>
-        <button id="paste" class="btn">Paste</button>
-        <button id="fontDec" class="btn">A-</button>
-        <button id="fontInc" class="btn">A+</button>
-        <span class="hint">Shortcuts: Ctrl+Shift+C / Ctrl+Shift+V</span>
-      </div>
     </div>
     <div class="terminal-wrap">
       <div id="term"></div>
@@ -129,15 +109,6 @@ CONSOLE_HTML = """<!doctype html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
   <script>
     const statusEl = document.getElementById("status");
-    const tokenInput = document.getElementById("token");
-    const connectBtn = document.getElementById("connect");
-    const disconnectBtn = document.getElementById("disconnect");
-    const interruptBtn = document.getElementById("interrupt");
-    const clearBtn = document.getElementById("clear");
-    const copyBtn = document.getElementById("copy");
-    const pasteBtn = document.getElementById("paste");
-    const fontDecBtn = document.getElementById("fontDec");
-    const fontIncBtn = document.getElementById("fontInc");
 
     let ws = null;
     let fontSize = Number(localStorage.getItem("ha_console_font") || "14");
@@ -146,22 +117,20 @@ CONSOLE_HTML = """<!doctype html>
       cursorBlink: true,
       convertEol: true,
       fontSize,
-      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: '"Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace',
       scrollback: 10000,
       rightClickSelectsWord: true,
       theme: {
-        background: "#0b1016",
-        foreground: "#d8e0ea",
-        cursor: "#7ee787",
-        selectionBackground: "rgba(63, 131, 248, 0.35)"
+        background: "#0c0f14",
+        foreground: "#e8edf3",
+        cursor: "#57c7ff",
+        selectionBackground: "rgba(0, 120, 212, 0.40)"
       }
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById("term"));
-    term.writeln("HA Control Agent console ready.");
-
-    tokenInput.value = localStorage.getItem("ha_control_session") || "";
+    term.writeln("HA Control Agent console ready. Shortcuts: Ctrl+Shift+C/V, Ctrl+Shift+X (interrupt), Ctrl+Shift+L (clear).");
 
     function setStatus(message, connected) {
       statusEl.textContent = message;
@@ -188,7 +157,7 @@ CONSOLE_HTML = """<!doctype html>
 
     function connect() {
       if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
-      const token = tokenInput.value.trim();
+      const token = localStorage.getItem("ha_control_session") || "";
       if (token) localStorage.setItem("ha_control_session", token);
       const query = token ? ("?token=" + encodeURIComponent(token)) : "";
       const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
@@ -238,17 +207,8 @@ CONSOLE_HTML = """<!doctype html>
       sendResize();
     }
 
-    connectBtn.addEventListener("click", connect);
-    disconnectBtn.addEventListener("click", disconnect);
-    interruptBtn.addEventListener("click", () => send({ type: "input", data: "\\u0003" }));
-    clearBtn.addEventListener("click", () => term.clear());
-    copyBtn.addEventListener("click", copySelection);
-    pasteBtn.addEventListener("click", pasteClipboard);
-    fontDecBtn.addEventListener("click", () => adjustFont(-1));
-    fontIncBtn.addEventListener("click", () => adjustFont(1));
-
-    tokenInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") connect();
+    statusEl.addEventListener("click", () => {
+      if (ws && ws.readyState === 1) disconnect(); else connect();
     });
 
     term.onData((data) => send({ type: "input", data }));
@@ -256,6 +216,11 @@ CONSOLE_HTML = """<!doctype html>
       if (!event.ctrlKey || !event.shiftKey) return true;
       if (event.key.toLowerCase() === "c") { copySelection(); return false; }
       if (event.key.toLowerCase() === "v") { pasteClipboard(); return false; }
+      if (event.key.toLowerCase() === "x") { send({ type: "input", data: "\\u0003" }); return false; }
+      if (event.key.toLowerCase() === "l") { term.clear(); return false; }
+      if (event.key === "+") { adjustFont(1); return false; }
+      if (event.key === "_") { adjustFont(-1); return false; }
+      if (event.key.toLowerCase() === "r") { connect(); return false; }
       return true;
     });
     term.textarea?.addEventListener("paste", (event) => {
@@ -267,6 +232,7 @@ CONSOLE_HTML = """<!doctype html>
 
     setStatus("Disconnected", false);
     sendResize();
+    connect();
   </script>
 </body>
 </html>"""

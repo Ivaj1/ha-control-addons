@@ -42,6 +42,10 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - Authentication: Basic auth using add-on options `webdav_username` + `webdav_password`.
 - Full filesystem exposure when `webdav_host_namespace: true` and `webdav_root: /`.
 - Optional safety mode: `webdav_read_only: true`.
+- Optional HTTPS endpoint for better Windows compatibility:
+  - Enable `webdav_https_enabled: true`
+  - Use `https://<HA_IP>:<webdav_https_port>/webdav/` (default port `9443`)
+  - Cert/key options: `webdav_https_cert`, `webdav_https_key`
 
 ## Security posture
 
