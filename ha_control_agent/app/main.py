@@ -13,6 +13,7 @@ import os
 import posixpath
 from pathlib import Path
 import pty
+import re
 import signal
 import shutil
 import struct
@@ -72,9 +73,9 @@ CONSOLE_HTML = """<!doctype html>
   <title>cmd</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #0c0c0c; overflow: hidden; }
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #term { width: 100vw; height: 100vh; }
-    #term .xterm-viewport { scrollbar-width: none; background: #0c0c0c !important; }
+    #term .xterm-viewport { scrollbar-width: none; }
     #term .xterm-viewport::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
   </style>
 </head>
@@ -100,16 +101,11 @@ CONSOLE_HTML = """<!doctype html>
     const term = new Terminal({
       cursorBlink: true,
       convertEol: true,
-      fontSize: 16,
-      fontFamily: '"Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace',
-      scrollback: 10000,
-      theme: {
-        background: "#0c0c0c",
-        foreground: "#cccccc",
-        cursor: "#cccccc",
-        selectionBackground: "rgba(255,255,255,0.25)"
-      }
+      scrollback: 20000,
+      drawBoldTextInBrightColors: false,
+      minimumContrastRatio: 1,
     });
+
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById("term"));
@@ -207,6 +203,18 @@ def _set_pty_size(fd: int, cols: int, rows: int) -> None:
 CONSOLE_SESSION_TTL_SECONDS = 1800
 _console_sessions: dict[str, "ConsoleSession"] = {}
 _console_sessions_lock = asyncio.Lock()
+_ANSI_OSC_RE = re.compile(r"\x1b\].*?(?:\x07|\x1b\\)", re.DOTALL)
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_ANSI_ESC_RE = re.compile(r"\x1b[@-Z\\-_]")
+
+
+def _strip_ansi_for_replay(text: str) -> str:
+    # Reconnect replay should keep readable transcript without control sequences
+    # that switch buffers, clear the viewport, or reposition cursor.
+    clean = _ANSI_OSC_RE.sub("", text)
+    clean = _ANSI_CSI_RE.sub("", clean)
+    clean = _ANSI_ESC_RE.sub("", clean)
+    return clean.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class ConsoleSession:
@@ -223,7 +231,7 @@ class ConsoleSession:
         self.last_detached_at = asyncio.get_running_loop().time()
         self.history: deque[str] = deque()
         self.history_chars = 0
-        self.max_history_chars = 200_000
+        self.max_history_chars = 2_000_000
 
     def _push_history(self, chunk: str) -> None:
         self.history.append(chunk)
@@ -288,8 +296,10 @@ class ConsoleSession:
             self.cleanup_task.cancel()
         self.clients.add(ws)
         if self.history:
+            replay_text = _strip_ansi_for_replay("".join(self.history))
             try:
-                await ws.send_text("".join(self.history))
+                if replay_text:
+                    await ws.send_text(replay_text)
             except Exception:
                 self.clients.discard(ws)
 

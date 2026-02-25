@@ -15,6 +15,7 @@
 - New SMB options: `smb_enabled`, `smb_username`, `smb_password`, `smb_share_name`, `smb_root`, `smb_read_only`, `smb_allow_hosts`.
 - Default SMB root is `/proc/1/root` for complete host filesystem access.
 - Fixed SMB listen configuration: no longer binds only to loopback (`lo`), making Windows LAN access possible.
+- Added `codex_seed_defaults` option (`true` by default). Set it to `false` to prevent startup seeding of Codex skills and `AGENTS.md`/`agent.md`.
 
 ## 0.2.7
 

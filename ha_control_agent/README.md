@@ -33,6 +33,7 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - Configure `openai_api_key` in add-on options.
 - `codex_home` defaults to `/share/codex` (persistent).
 - On startup, the add-on creates `$codex_home/skills` and seeds bundled default skills.
+- Set `codex_seed_defaults: false` to fully disable startup seeding of `skills`, `AGENTS.md`, and `agent.md`.
 - `ha-control` CLI is bundled in the image and available directly in the add-on console.
 - On startup, `$codex_home/AGENTS.md` and `$codex_home/agent.md` are created to instruct Codex to use skills and Home Assistant context.
 

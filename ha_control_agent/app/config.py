@@ -83,6 +83,7 @@ class Settings:
     unsafe_allow_special_paths: bool
     openai_api_key: str
     codex_home: str
+    codex_seed_defaults: bool
     webdav_enabled: bool
     webdav_username: str
     webdav_password: str
@@ -131,6 +132,10 @@ class Settings:
             ),
             openai_api_key=str(os.getenv("OPENAI_API_KEY", options.get("openai_api_key", ""))).strip(),
             codex_home=str(os.getenv("CODEX_HOME", options.get("codex_home", "/share/codex"))).strip(),
+            codex_seed_defaults=_to_bool(
+                os.getenv("HACTRL_CODEX_SEED_DEFAULTS", options.get("codex_seed_defaults", True)),
+                True,
+            ),
             webdav_enabled=_to_bool(os.getenv("HACTRL_WEBDAV_ENABLED", options.get("webdav_enabled", True)), True),
             webdav_username=str(os.getenv("HACTRL_WEBDAV_USERNAME", options.get("webdav_username", "admin"))).strip(),
             webdav_password=str(os.getenv("HACTRL_WEBDAV_PASSWORD", options.get("webdav_password", ""))).strip(),

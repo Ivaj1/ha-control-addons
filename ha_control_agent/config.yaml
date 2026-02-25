@@ -59,6 +59,7 @@ options:
   supervisor_token: ""
   openai_api_key: ""
   codex_home: /share/codex
+  codex_seed_defaults: true
   webdav_enabled: true
   webdav_username: admin
   webdav_password: ""
@@ -92,6 +93,7 @@ schema:
   supervisor_token: str?
   openai_api_key: password?
   codex_home: str
+  codex_seed_defaults: bool
   webdav_enabled: bool
   webdav_username: str
   webdav_password: password?
