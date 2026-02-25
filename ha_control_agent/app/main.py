@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import deque
 from datetime import UTC, datetime
 from email.utils import formatdate
 import fcntl
@@ -44,7 +45,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.10"
+AGENT_VERSION = "0.2.11"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
@@ -68,76 +69,50 @@ CONSOLE_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HA Control Console</title>
+  <title>cmd</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
   <style>
-    :root {
-      --bg: #0c0f14;
-      --panel: #151a20;
-      --line: #2b323d;
-      --text: #e8edf3;
-      --muted: #9aa4b2;
-      --accent: #0078d4;
-      --accent-2: #006cbe;
-    }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: linear-gradient(180deg, #131821 0, var(--bg) 45%); color: var(--text); font-family: "Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
-    .topbar { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #202833 0%, #171d25 100%); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
-    .title { font-size: 14px; font-weight: 700; letter-spacing: 0.2px; }
-    .title small { color: var(--muted); font-weight: 500; margin-left: 8px; }
-    .status { font-size: 12px; color: #d3e8ff; border: 1px solid #1f3f5b; background: #12253a; padding: 4px 8px; border-radius: 999px; }
-    .status:hover { filter: brightness(1.08); cursor: pointer; }
-    .terminal-wrap { padding: 10px; height: 100%; min-height: 0; }
-    #term { width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.35); }
-    #term .xterm-viewport { scrollbar-width: none; background: transparent !important; }
+    html, body { height: 100%; margin: 0; background: #0c0c0c; overflow: hidden; }
+    #term { width: 100vw; height: 100vh; }
+    #term .xterm-viewport { scrollbar-width: none; background: #0c0c0c !important; }
     #term .xterm-viewport::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="topbar">
-      <div class="title">HA Control Console <small>Windows style minimal</small></div>
-      <div id="status" class="status">Disconnected</div>
-    </div>
-    <div class="terminal-wrap">
-      <div id="term"></div>
-    </div>
-  </div>
+  <div id="term"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
   <script>
-    const statusEl = document.getElementById("status");
-
     let ws = null;
-    let fontSize = Number(localStorage.getItem("ha_console_font") || "14");
+    const sessionKey = "ha_console_client_id";
+    let clientId = localStorage.getItem(sessionKey);
+    if (!clientId) {
+      clientId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+      localStorage.setItem(sessionKey, clientId);
+    }
+    const qs = new URLSearchParams(window.location.search);
+    const incomingToken = qs.get("token");
+    if (incomingToken) {
+      localStorage.setItem("ha_control_session", incomingToken);
+    }
 
     const term = new Terminal({
       cursorBlink: true,
       convertEol: true,
-      fontSize,
+      fontSize: 16,
       fontFamily: '"Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace',
       scrollback: 10000,
-      rightClickSelectsWord: true,
       theme: {
-        background: "#0c0f14",
-        foreground: "#e8edf3",
-        cursor: "#57c7ff",
-        selectionBackground: "rgba(0, 120, 212, 0.40)"
+        background: "#0c0c0c",
+        foreground: "#cccccc",
+        cursor: "#cccccc",
+        selectionBackground: "rgba(255,255,255,0.25)"
       }
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById("term"));
-    term.writeln("HA Control Agent console ready.");
-
-    function setStatus(message, connected) {
-      statusEl.textContent = message;
-      statusEl.style.color = connected ? "#7ee787" : "#f0c674";
-      statusEl.style.borderColor = connected ? "#294733" : "#5a471f";
-      statusEl.style.background = connected ? "#0f1d14" : "#22180f";
-    }
 
     function wsPath() {
       const path = window.location.pathname.replace(/\\/$/, "");
@@ -158,42 +133,28 @@ CONSOLE_HTML = """<!doctype html>
     function connect() {
       if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       const token = localStorage.getItem("ha_control_session") || "";
-      if (token) localStorage.setItem("ha_control_session", token);
-      const query = token ? ("?token=" + encodeURIComponent(token)) : "";
+      const query = new URLSearchParams();
+      query.set("client_id", clientId);
+      if (token) query.set("token", token);
       const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
-      ws = new WebSocket(proto + window.location.host + wsPath() + query);
+      ws = new WebSocket(proto + window.location.host + wsPath() + "?" + query.toString());
 
       ws.onopen = () => {
-        setStatus("Connected", true);
-        term.writeln("\\r\\n[connected]");
         sendResize();
       };
       ws.onclose = () => {
-        setStatus("Disconnected", false);
-        term.writeln("\\r\\n[disconnected]");
+        setTimeout(connect, 1000);
       };
       ws.onerror = () => {
-        setStatus("Connection error", false);
-        term.writeln("\\r\\n[connection error]");
+        ws.close();
       };
       ws.onmessage = (event) => {
         if (typeof event.data === "string") term.write(event.data);
       };
     }
 
-    function disconnect() {
-      if (ws) ws.close();
-      ws = null;
-    }
-
-    statusEl.addEventListener("click", () => {
-      if (ws && ws.readyState === 1) disconnect(); else connect();
-    });
-
     term.onData((data) => send({ type: "input", data }));
     window.addEventListener("resize", sendResize);
-
-    setStatus("Disconnected", false);
     sendResize();
     connect();
   </script>
@@ -241,6 +202,166 @@ def _console_shell_cmd() -> list[str]:
 def _set_pty_size(fd: int, cols: int, rows: int) -> None:
     winsize = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+
+
+CONSOLE_SESSION_TTL_SECONDS = 1800
+_console_sessions: dict[str, "ConsoleSession"] = {}
+_console_sessions_lock = asyncio.Lock()
+
+
+class ConsoleSession:
+    def __init__(self, *, key: str, subject: str, source_ip: str) -> None:
+        self.key = key
+        self.subject = subject
+        self.source_ip = source_ip
+        self.clients: set[WebSocket] = set()
+        self.master_fd: int | None = None
+        self.process: asyncio.subprocess.Process | None = None
+        self.reader_task: asyncio.Task[None] | None = None
+        self.cleanup_task: asyncio.Task[None] | None = None
+        self.closed = False
+        self.last_detached_at = asyncio.get_running_loop().time()
+        self.history: deque[str] = deque()
+        self.history_chars = 0
+        self.max_history_chars = 200_000
+
+    def _push_history(self, chunk: str) -> None:
+        self.history.append(chunk)
+        self.history_chars += len(chunk)
+        while self.history and self.history_chars > self.max_history_chars:
+            removed = self.history.popleft()
+            self.history_chars -= len(removed)
+
+    async def start(self) -> None:
+        shell_cmd = _console_shell_cmd()
+        cwd = settings.console_cwd if Path(settings.console_cwd).exists() else "/"
+        env = os.environ.copy()
+        if settings.openai_api_key:
+            env["OPENAI_API_KEY"] = settings.openai_api_key
+        env["CODEX_HOME"] = str(codex_runtime.get("codex_home", settings.codex_home))
+
+        master_fd, slave_fd = pty.openpty()
+        _set_pty_size(master_fd, 120, 40)
+        process = await asyncio.create_subprocess_exec(
+            *shell_cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=cwd,
+            env=env,
+        )
+        os.close(slave_fd)
+        self.master_fd = master_fd
+        self.process = process
+        self.reader_task = asyncio.create_task(self._reader_loop(), name=f"console_reader:{self.key}")
+
+        write_audit_entry(
+            actor=self.subject,
+            source_ip=self.source_ip,
+            action="console.session.start",
+            details={"key": self.key, "shell": settings.console_shell, "cwd": cwd, "cmd": shell_cmd},
+        )
+
+    async def _reader_loop(self) -> None:
+        if self.master_fd is None:
+            return
+        while not self.closed:
+            try:
+                chunk = await asyncio.to_thread(os.read, self.master_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            text = chunk.decode("utf-8", errors="replace")
+            self._push_history(text)
+            stale: list[WebSocket] = []
+            for ws in self.clients:
+                try:
+                    await ws.send_text(text)
+                except Exception:
+                    stale.append(ws)
+            for ws in stale:
+                self.clients.discard(ws)
+
+    async def attach(self, ws: WebSocket) -> None:
+        if self.cleanup_task and not self.cleanup_task.done():
+            self.cleanup_task.cancel()
+        self.clients.add(ws)
+        if self.history:
+            try:
+                await ws.send_text("".join(self.history))
+            except Exception:
+                self.clients.discard(ws)
+
+    async def detach(self, ws: WebSocket) -> None:
+        self.clients.discard(ws)
+        if not self.clients:
+            self.last_detached_at = asyncio.get_running_loop().time()
+            self.cleanup_task = asyncio.create_task(_cleanup_console_session(self.key, self))
+
+    async def write_input(self, text: str) -> None:
+        if self.master_fd is None:
+            return
+        await asyncio.to_thread(os.write, self.master_fd, text.encode("utf-8"))
+
+    async def resize(self, cols: int, rows: int) -> None:
+        if self.master_fd is None:
+            return
+        cols = max(20, min(cols, 500))
+        rows = max(8, min(rows, 200))
+        await asyncio.to_thread(_set_pty_size, self.master_fd, cols, rows)
+        if self.process and self.process.pid:
+            try:
+                os.kill(self.process.pid, signal.SIGWINCH)
+            except ProcessLookupError:
+                pass
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+
+        if self.reader_task and not self.reader_task.done():
+            self.reader_task.cancel()
+
+        if self.process:
+            try:
+                self.process.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                await self.process.wait()
+            except Exception:
+                pass
+
+        if self.master_fd is not None:
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+            self.master_fd = None
+
+        write_audit_entry(
+            actor=self.subject,
+            source_ip=self.source_ip,
+            action="console.session.stop",
+            details={"key": self.key},
+        )
+
+
+async def _cleanup_console_session(key: str, runtime: ConsoleSession) -> None:
+    await asyncio.sleep(CONSOLE_SESSION_TTL_SECONDS)
+    async with _console_sessions_lock:
+        current = _console_sessions.get(key)
+        if current is not runtime:
+            return
+        if current.clients:
+            return
+        elapsed = asyncio.get_running_loop().time() - current.last_detached_at
+        if elapsed < CONSOLE_SESSION_TTL_SECONDS:
+            return
+        _console_sessions.pop(key, None)
+    await runtime.close()
 
 
 def _webdav_root_norm() -> str:
@@ -502,93 +623,50 @@ async def console_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
 
+    client_id = (websocket.query_params.get("client_id") or "default").strip()[:128]
+    session_key = f"{subject}:{client_id}"
+
+    async with _console_sessions_lock:
+        runtime = _console_sessions.get(session_key)
+        if runtime is None or runtime.closed:
+            runtime = ConsoleSession(key=session_key, subject=subject, source_ip=client_ip)
+            await runtime.start()
+            _console_sessions[session_key] = runtime
+
     await websocket.accept()
-
-    shell_cmd = _console_shell_cmd()
-    cwd = settings.console_cwd if Path(settings.console_cwd).exists() else "/"
-    env = os.environ.copy()
-    if settings.openai_api_key:
-        env["OPENAI_API_KEY"] = settings.openai_api_key
-    env["CODEX_HOME"] = str(codex_runtime.get("codex_home", settings.codex_home))
-    master_fd, slave_fd = pty.openpty()
-    _set_pty_size(master_fd, 120, 40)
-    process = await asyncio.create_subprocess_exec(
-        *shell_cmd,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        cwd=cwd,
-        env=env,
-    )
-    os.close(slave_fd)
-
-    async def _pty_to_ws() -> None:
-        try:
-            while True:
-                chunk = await asyncio.to_thread(os.read, master_fd, 4096)
-                if not chunk:
-                    break
-                await websocket.send_text(chunk.decode("utf-8", errors="replace"))
-        except Exception:
-            pass
-
-    async def _ws_to_pty() -> None:
-        try:
-            while True:
-                data = await websocket.receive_text()
-                payload: dict[str, Any] | None = None
-                try:
-                    parsed = json.loads(data)
-                    if isinstance(parsed, dict):
-                        payload = parsed
-                except json.JSONDecodeError:
-                    payload = None
-
-                if payload and payload.get("type") == "resize":
-                    cols = int(payload.get("cols", 120))
-                    rows = int(payload.get("rows", 40))
-                    cols = max(20, min(cols, 500))
-                    rows = max(8, min(rows, 200))
-                    await asyncio.to_thread(_set_pty_size, master_fd, cols, rows)
-                    if process.pid:
-                        try:
-                            os.kill(process.pid, signal.SIGWINCH)
-                        except ProcessLookupError:
-                            pass
-                    continue
-
-                text = payload.get("data") if payload and payload.get("type") == "input" else data
-                await asyncio.to_thread(os.write, master_fd, str(text).encode("utf-8"))
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            pass
+    await runtime.attach(websocket)
 
     write_audit_entry(
         actor=subject,
         source_ip=client_ip,
-        action="console.open",
-        details={"shell": settings.console_shell, "cwd": cwd, "cmd": shell_cmd},
+        action="console.ws.attach",
+        details={"session_key": session_key},
     )
 
     try:
-        await asyncio.wait(
-            [
-                asyncio.create_task(_pty_to_ws()),
-                asyncio.create_task(_ws_to_pty()),
-            ],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        while True:
+            data = await websocket.receive_text()
+            payload: dict[str, Any] | None = None
+            try:
+                parsed = json.loads(data)
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except json.JSONDecodeError:
+                payload = None
+
+            if payload and payload.get("type") == "resize":
+                await runtime.resize(
+                    int(payload.get("cols", 120)),
+                    int(payload.get("rows", 40)),
+                )
+                continue
+
+            text = payload.get("data") if payload and payload.get("type") == "input" else data
+            await runtime.write_input(str(text))
+    except WebSocketDisconnect:
+        pass
     finally:
-        try:
-            process.terminate()
-        except ProcessLookupError:
-            pass
-        await process.wait()
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
+        await runtime.detach(websocket)
 
 
 @app.api_route(
