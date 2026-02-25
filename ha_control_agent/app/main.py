@@ -45,7 +45,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.12"
+AGENT_VERSION = "0.2.13"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
