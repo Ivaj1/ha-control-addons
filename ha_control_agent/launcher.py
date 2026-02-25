@@ -1,4 +1,4 @@
-"""Launcher for HA Control Agent with optional HTTPS WebDAV endpoint."""
+"""Launcher for HA Control Agent with optional HTTPS WebDAV and SMB endpoint."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import time
 
 OPTIONS_PATH = Path("/data/options.json")
 STUNNEL_CONF = Path("/tmp/stunnel.conf")
+SMB_CONF = Path("/tmp/smb.conf")
 
 
 def _read_options() -> dict:
@@ -55,6 +56,103 @@ def _start_uvicorn() -> subprocess.Popen:
     )
 
 
+def _run_quiet(argv: list[str], *, input_text: str | None = None) -> int:
+    proc = subprocess.run(  # noqa: S603
+        argv,
+        input=input_text.encode("utf-8") if input_text is not None else None,
+        capture_output=True,
+        check=False,
+    )
+    return proc.returncode
+
+
+def _init_smb_user(username: str, password: str) -> None:
+    # Ignore failures for already-existing principals.
+    _run_quiet(["addgroup", username])
+    _run_quiet(["adduser", "-D", "-H", "-G", username, "-s", "/bin/false", username])
+    _run_quiet(["smbpasswd", "-a", "-s", username], input_text=f"{password}\n{password}\n")
+
+
+def _build_smb_conf(
+    *,
+    share_name: str,
+    username: str,
+    share_path: str,
+    read_only: bool,
+    allow_hosts: list[str],
+) -> str:
+    allow_hosts_line = " ".join(["127.0.0.1", *allow_hosts]).strip()
+    writable = "no" if read_only else "yes"
+    return "\n".join(
+        [
+            "[global]",
+            "   workgroup = WORKGROUP",
+            "   server string = HA Control SMB",
+            "   security = user",
+            "   map to guest = never",
+            "   hosts allow = " + allow_hosts_line,
+            "   bind interfaces only = yes",
+            "   interfaces = lo",
+            "   load printers = no",
+            "   disable spoolss = yes",
+            "   log level = 1",
+            "",
+            f"[{share_name}]",
+            f"   path = {share_path}",
+            "   browseable = yes",
+            f"   writeable = {writable}",
+            f"   valid users = {username}",
+            "   force user = root",
+            "   force group = root",
+            "",
+        ]
+    )
+
+
+def _start_smb(options: dict) -> subprocess.Popen | None:
+    enabled = _as_bool(options.get("smb_enabled"), True)
+    if not enabled:
+        return None
+
+    username = str(options.get("smb_username", "haos")).strip()
+    password = str(options.get("smb_password", "")).strip()
+    share_name = str(options.get("smb_share_name", "haos-root")).strip() or "haos-root"
+    read_only = _as_bool(options.get("smb_read_only"), False)
+    share_path = str(options.get("smb_root", "/proc/1/root")).strip() or "/proc/1/root"
+    allow_hosts = options.get("smb_allow_hosts")
+    if not isinstance(allow_hosts, list) or not allow_hosts:
+        allow_hosts = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+    if not username or not password:
+        print("[launcher] SMB enabled but username/password missing; skipping SMB startup", flush=True)
+        return None
+
+    if not Path(share_path).exists():
+        print(f"[launcher] SMB share path '{share_path}' does not exist; fallback to '/'", flush=True)
+        share_path = "/"
+
+    Path("/var/lib/samba").mkdir(parents=True, exist_ok=True)
+    for db in ("account_policy.tdb", "registry.tdb", "winbindd_idmap.tdb"):
+        Path("/var/lib/samba", db).touch(exist_ok=True)
+    Path("/etc/samba/lmhosts").touch(exist_ok=True)
+
+    _init_smb_user(username, password)
+
+    SMB_CONF.write_text(
+        _build_smb_conf(
+            share_name=share_name,
+            username=username,
+            share_path=share_path,
+            read_only=read_only,
+            allow_hosts=[str(x) for x in allow_hosts],
+        ),
+        encoding="utf-8",
+    )
+
+    # Keep single-process foreground mode for launcher supervision.
+    return subprocess.Popen(["smbd", "--foreground", "--no-process-group", "-s", str(SMB_CONF)])  # noqa: S603
+
+
 def _start_stunnel(port: int, cert: str, key: str) -> subprocess.Popen | None:
     cert_path = Path(cert)
     key_path = Path(key)
@@ -92,8 +190,9 @@ def main() -> int:
 
     uvicorn = _start_uvicorn()
     stunnel = _start_stunnel(https_port, https_cert, https_key) if https_enabled else None
+    smbd = _start_smb(options)
 
-    children = [proc for proc in (uvicorn, stunnel) if proc is not None]
+    children = [proc for proc in (uvicorn, stunnel, smbd) if proc is not None]
 
     def _terminate(_signum: int, _frame: object) -> None:
         for proc in children:
@@ -126,8 +225,11 @@ def main() -> int:
             STUNNEL_CONF.unlink(missing_ok=True)
         except OSError:
             pass
+        try:
+            SMB_CONF.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

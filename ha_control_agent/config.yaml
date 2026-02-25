@@ -1,7 +1,7 @@
 name: HA Control Agent
 slug: ha_control_agent
 description: Full-control LAN agent for Home Assistant OS (host, Supervisor, Core, filesystem, and CLI orchestration)
-version: 0.2.11
+version: 0.2.12
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent
 startup: services
 boot: manual
@@ -39,9 +39,13 @@ map:
 ports:
   9123/tcp: 9123
   9443/tcp: 9443
+  445/tcp: 445
+  139/tcp: 139
 ports_description:
   9123/tcp: HA Control Agent API
   9443/tcp: HA Control Agent WebDAV HTTPS (optional)
+  445/tcp: HA Control Agent SMB (full host share)
+  139/tcp: HA Control Agent SMB NetBIOS
 options:
   trusted_cidrs:
     - 127.0.0.1/32
@@ -65,6 +69,16 @@ options:
   webdav_https_port: 9443
   webdav_https_cert: /ssl/fullchain.pem
   webdav_https_key: /ssl/privkey.pem
+  smb_enabled: true
+  smb_username: haos
+  smb_password: ""
+  smb_share_name: haos-root
+  smb_root: /proc/1/root
+  smb_read_only: false
+  smb_allow_hosts:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
   console_shell: /bin/sh
   console_cwd: /homeassistant
   console_host_namespace: false
@@ -88,6 +102,14 @@ schema:
   webdav_https_port: int
   webdav_https_cert: str
   webdav_https_key: str
+  smb_enabled: bool
+  smb_username: str
+  smb_password: password?
+  smb_share_name: str
+  smb_root: str
+  smb_read_only: bool
+  smb_allow_hosts:
+    - str
   console_shell: str
   console_cwd: str
   console_host_namespace: bool

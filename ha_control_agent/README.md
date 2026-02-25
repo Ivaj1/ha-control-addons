@@ -47,6 +47,19 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
   - Use `https://<HA_IP>:<webdav_https_port>/webdav/` (default port `9443`)
   - Cert/key options: `webdav_https_cert`, `webdav_https_key`
 
+## SMB (Windows native)
+
+- Native SMB server is available in this add-on for Windows Explorer compatibility.
+- Configure:
+  - `smb_enabled: true`
+  - `smb_username` / `smb_password`
+  - `smb_share_name` (default `haos-root`)
+  - `smb_root` (default `/proc/1/root`, full host filesystem)
+  - `smb_read_only` optional
+- Connect from Windows:
+  - `\\\\<HA_IP>\\<smb_share_name>`
+  - Example: `\\\\192.168.1.44\\haos-root`
+
 ## Security posture
 
 - High privilege by design (`full_access: true`, `protected: false`).

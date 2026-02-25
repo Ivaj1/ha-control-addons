@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apk add --no-cache util-linux bash coreutils findutils
 RUN apk add --no-cache nodejs npm
 RUN apk add --no-cache stunnel
+RUN apk add --no-cache samba
 RUN npm install -g --unsafe-perm @openai/codex
 
 WORKDIR /app

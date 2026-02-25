@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.11
+## 0.2.12
 
 - Added optional HTTPS listener for WebDAV using stunnel and `/ssl` certs.
 - Added HTTPS options: `webdav_https_enabled`, `webdav_https_port`, `webdav_https_cert`, `webdav_https_key`.
@@ -11,6 +11,9 @@
 - Removed custom clipboard/shortcut interception to behave like a normal terminal session.
 - Changed console to full-screen plain CMD-like view (no top bars/titles).
 - Added persistent backend console sessions keyed by client id, so page reload/navigation reconnects to the same shell session.
+- Added native SMB server in add-on (Samba) with configurable full-host share.
+- New SMB options: `smb_enabled`, `smb_username`, `smb_password`, `smb_share_name`, `smb_root`, `smb_read_only`, `smb_allow_hosts`.
+- Default SMB root is `/proc/1/root` for complete host filesystem access.
 
 ## 0.2.7
 
