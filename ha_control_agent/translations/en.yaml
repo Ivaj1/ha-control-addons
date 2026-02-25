@@ -1,0 +1,18 @@
+name: HA Control Agent
+description: High-privilege local control plane for Home Assistant OS.
+configuration:
+  trusted_cidrs:
+    name: Trusted CIDRs
+    description: CIDR ranges allowed to call the API.
+  session_ttl_seconds:
+    name: Session TTL seconds
+    description: Lifetime for local session tokens.
+  allow_unverified_bootstrap:
+    name: Allow unverified bootstrap
+    description: Skip LLAT validation against Core (unsafe).
+  unsafe_allow_exec:
+    name: Unsafe allow exec
+    description: Disable command allowlist enforcement (unsafe).
+  unsafe_allow_special_paths:
+    name: Unsafe allow special paths
+    description: Allow operations in /proc, /sys, /dev (unsafe).

@@ -1,0 +1,50 @@
+name: HA Control Agent
+slug: ha_control_agent
+description: Full-control LAN agent for Home Assistant OS (host, Supervisor, Core, filesystem, and CLI orchestration)
+version: 0.1.0
+image: ghcr.io/ivaj/{arch}-addon-ha-control-agent
+url: https://github.com/ivaj/ha-control-addons/tree/main/ha_control_agent
+startup: services
+boot: manual
+init: false
+arch:
+  - aarch64
+  - amd64
+hassio_api: true
+hassio_role: admin
+homeassistant_api: true
+docker_api: true
+host_network: true
+host_pid: true
+host_dbus: true
+full_access: true
+protected: false
+map:
+  - addons:rw
+  - all_addon_configs:rw
+  - backup:rw
+  - homeassistant_config:rw
+  - media:rw
+  - share:rw
+  - ssl:rw
+ports:
+  9123/tcp: 9123
+ports_description:
+  9123/tcp: HA Control Agent API
+options:
+  trusted_cidrs:
+    - 127.0.0.1/32
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  session_ttl_seconds: 43200
+  allow_unverified_bootstrap: false
+  unsafe_allow_exec: false
+  unsafe_allow_special_paths: false
+schema:
+  trusted_cidrs:
+    - str
+  session_ttl_seconds: int(60,604800)
+  allow_unverified_bootstrap: bool
+  unsafe_allow_exec: bool
+  unsafe_allow_special_paths: bool

@@ -1,0 +1,29 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    outputs:
+      addons: ${{ steps.addons.outputs.addons_list }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: addons
+        uses: home-assistant/actions/helpers/find-addons@master
+
+  lint:
+    runs-on: ubuntu-latest
+    needs: find
+    strategy:
+      matrix:
+        path: ${{ fromJson(needs.find.outputs.addons) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-addon-linter@v2.21
+        with:
+          path: ./${{ matrix.path }}

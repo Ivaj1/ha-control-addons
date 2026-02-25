@@ -1,0 +1,6 @@
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  amd64: ghcr.io/home-assistant/amd64-base:latest
+labels:
+  org.opencontainers.image.title: "HA Control Agent"
+  org.opencontainers.image.description: "Full-control LAN agent for Home Assistant OS"
