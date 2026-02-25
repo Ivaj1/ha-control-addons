@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+import fcntl
 import json
 import os
 from pathlib import Path
 import pty
+import signal
 import shutil
+import struct
+import termios
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
@@ -16,6 +20,7 @@ from fastapi.responses import HTMLResponse
 import httpx
 
 from .audit import write_audit_entry
+from .codex_setup import ensure_codex_home
 from .config import settings
 from .filesystem import delete_path, move_path, read_file, tree, write_file
 from .host_exec import run_command
@@ -34,9 +39,10 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.2"
+AGENT_VERSION = "0.2.3"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
+codex_runtime: dict[str, str | bool] = {}
 
 
 def _source_ip(request: Request) -> str:
@@ -83,6 +89,19 @@ CONSOLE_HTML = """<!doctype html>
     tokenInput.value = localStorage.getItem("ha_control_session") || "";
     let ws = null;
 
+    function calcSize() {
+      const cols = Math.max(40, Math.floor(window.innerWidth / 9));
+      const rows = Math.max(12, Math.floor((window.innerHeight - 50) / 18));
+      return { cols, rows };
+    }
+
+    function sendResize() {
+      if (!ws || ws.readyState !== 1) return;
+      const { cols, rows } = calcSize();
+      term.resize(cols, rows);
+      ws.send(JSON.stringify({type: "resize", cols, rows}));
+    }
+
     function connect() {
       if (ws && ws.readyState <= 1) return;
       const path = window.location.pathname.replace(/\\/$/, "");
@@ -93,7 +112,10 @@ CONSOLE_HTML = """<!doctype html>
       const query = token ? ("?token=" + encodeURIComponent(token)) : "";
       const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
       ws = new WebSocket(proto + window.location.host + wsPath + query);
-      ws.onopen = () => term.writeln("\\r\\n[connected]");
+      ws.onopen = () => {
+        term.writeln("\\r\\n[connected]");
+        sendResize();
+      };
       ws.onclose = () => term.writeln("\\r\\n[disconnected]");
       ws.onerror = () => term.writeln("\\r\\n[connection error]");
       ws.onmessage = (event) => {
@@ -102,9 +124,10 @@ CONSOLE_HTML = """<!doctype html>
     }
 
     document.getElementById("connect").addEventListener("click", connect);
+    window.addEventListener("resize", sendResize);
     term.onData(data => {
       if (!ws || ws.readyState !== 1) return;
-      ws.send(data);
+      ws.send(JSON.stringify({type: "input", data}));
     });
   </script>
 </body>
@@ -144,9 +167,13 @@ def _console_shell_cmd() -> list[str]:
             "--net",
             "--pid",
             shell,
-            "-l",
         ]
-    return [shell, "-l"]
+    return [shell]
+
+
+def _set_pty_size(fd: int, cols: int, rows: int) -> None:
+    winsize = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
 
 async def _verify_long_lived_token(token: str) -> tuple[bool, str]:
@@ -184,7 +211,17 @@ async def _verify_long_lived_token(token: str) -> tuple[bool, str]:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "time": datetime.now(tz=UTC).isoformat()}
+    return {
+        "status": "ok",
+        "time": datetime.now(tz=UTC).isoformat(),
+        "codex_home": str(codex_runtime.get("codex_home", settings.codex_home)),
+    }
+
+
+@app.on_event("startup")
+async def _startup_tasks() -> None:
+    global codex_runtime
+    codex_runtime = ensure_codex_home()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -227,7 +264,9 @@ async def console_ws(websocket: WebSocket) -> None:
     env = os.environ.copy()
     if settings.openai_api_key:
         env["OPENAI_API_KEY"] = settings.openai_api_key
+    env["CODEX_HOME"] = str(codex_runtime.get("codex_home", settings.codex_home))
     master_fd, slave_fd = pty.openpty()
+    _set_pty_size(master_fd, 120, 40)
     process = await asyncio.create_subprocess_exec(
         *shell_cmd,
         stdin=slave_fd,
@@ -252,7 +291,29 @@ async def console_ws(websocket: WebSocket) -> None:
         try:
             while True:
                 data = await websocket.receive_text()
-                await asyncio.to_thread(os.write, master_fd, data.encode("utf-8"))
+                payload: dict[str, Any] | None = None
+                try:
+                    parsed = json.loads(data)
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except json.JSONDecodeError:
+                    payload = None
+
+                if payload and payload.get("type") == "resize":
+                    cols = int(payload.get("cols", 120))
+                    rows = int(payload.get("rows", 40))
+                    cols = max(20, min(cols, 500))
+                    rows = max(8, min(rows, 200))
+                    await asyncio.to_thread(_set_pty_size, master_fd, cols, rows)
+                    if process.pid:
+                        try:
+                            os.kill(process.pid, signal.SIGWINCH)
+                        except ProcessLookupError:
+                            pass
+                    continue
+
+                text = payload.get("data") if payload and payload.get("type") == "input" else data
+                await asyncio.to_thread(os.write, master_fd, str(text).encode("utf-8"))
         except WebSocketDisconnect:
             pass
         except Exception:

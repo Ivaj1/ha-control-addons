@@ -1,0 +1,4 @@
+interface:
+  display_name: "HAOS Full Control"
+  short_description: "Run full HAOS control workflows via agent CLI."
+  default_prompt: "Authenticate, validate capabilities, execute safe full-control operations, and follow rollback runbooks for HAOS."

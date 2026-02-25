@@ -82,6 +82,7 @@ class Settings:
     unsafe_allow_exec: bool
     unsafe_allow_special_paths: bool
     openai_api_key: str
+    codex_home: str
     console_shell: str
     console_cwd: str
     console_host_namespace: bool
@@ -119,6 +120,7 @@ class Settings:
                 False,
             ),
             openai_api_key=str(os.getenv("OPENAI_API_KEY", options.get("openai_api_key", ""))).strip(),
+            codex_home=str(os.getenv("CODEX_HOME", options.get("codex_home", "/share/codex"))).strip(),
             console_shell=str(os.getenv("HACTRL_CONSOLE_SHELL", options.get("console_shell", "/bin/sh"))).strip(),
             console_cwd=str(os.getenv("HACTRL_CONSOLE_CWD", options.get("console_cwd", "/homeassistant"))).strip(),
             console_host_namespace=_to_bool(

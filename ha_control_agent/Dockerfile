@@ -14,6 +14,7 @@ COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
 COPY app ./app
+COPY default_skills ./default_skills
 
 EXPOSE 9123
 

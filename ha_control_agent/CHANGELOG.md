@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+- Fixed web console TUI behavior (including `codex`) by adding terminal resize support over WebSocket.
+- Added PTY window-size initialization and resize signal forwarding (`SIGWINCH`).
+
+## 0.2.3
+
+- Added persistent Codex home support with new `codex_home` option (default `/share/codex`).
+- Added startup bootstrap to create `$CODEX_HOME/skills` and seed bundled default skills.
+- Removed login-shell startup warning in console (`/bin/sh: can't access tty`) by adjusting shell launch mode.
+
 ## 0.2.2
 
 - Fixed console behavior for Codex CLI: default console now runs in add-on container namespace, where `codex` is installed.
