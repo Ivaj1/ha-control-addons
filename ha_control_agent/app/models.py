@@ -88,6 +88,8 @@ class CapabilityFeatures(BaseModel):
     supervisor_proxy: bool
     retries: bool
     dry_run_support: bool
+    web_console: bool = True
+    codex_cli: bool = False
 
 
 class CapabilityModel(BaseModel):

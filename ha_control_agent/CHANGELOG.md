@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Added Home Assistant Ingress panel (`ingress: true`) with embedded web console at `/` and `/console`.
+- Added terminal WebSocket bridge at `/console/ws` with trusted-LAN checks and session/ingress auth.
+- Added add-on options for console runtime (`console_shell`, `console_cwd`) and OpenAI key (`openai_api_key`).
+- Added Codex CLI install in image (`@openai/codex`) and capability flag (`features.codex_cli`).
+
 ## 0.1.12
 
 - Added additional Linux capabilities (`SYS_PTRACE`, `DAC_READ_SEARCH`) for host namespace control in `protected: false` mode.

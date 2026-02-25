@@ -5,6 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apk add --no-cache util-linux bash coreutils findutils
+RUN apk add --no-cache nodejs npm
+RUN npm install -g --unsafe-perm @openai/codex
 
 WORKDIR /app
 

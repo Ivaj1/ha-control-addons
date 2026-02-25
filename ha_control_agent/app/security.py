@@ -57,8 +57,11 @@ def _extract_client_ip(request: Request) -> ipaddress._BaseAddress:
         ) from err
 
 
-def require_trusted_network(request: Request) -> None:
-    client_ip = _extract_client_ip(request)
+def is_trusted_ip(raw_ip: str) -> bool:
+    try:
+        client_ip = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return False
 
     for cidr in settings.trusted_cidrs:
         try:
@@ -66,7 +69,15 @@ def require_trusted_network(request: Request) -> None:
         except ValueError:
             continue
         if client_ip in network:
-            return
+            return True
+    return False
+
+
+def require_trusted_network(request: Request) -> None:
+    client_ip = _extract_client_ip(request)
+
+    if is_trusted_ip(str(client_ip)):
+        return
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -74,24 +85,25 @@ def require_trusted_network(request: Request) -> None:
     )
 
 
+def validate_bearer_token(authorization: str | None) -> SessionInfo | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    return session_store.validate(token)
+
+
 def require_session(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> SessionInfo:
     require_trusted_network(request)
-
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token",
-        )
-
-    token = authorization.split(" ", 1)[1].strip()
-    info = session_store.validate(token)
+    info = validate_bearer_token(authorization)
     if info is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired session token",
+            detail="Missing, invalid, or expired session token",
         )
 
     return info

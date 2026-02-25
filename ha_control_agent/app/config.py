@@ -81,6 +81,9 @@ class Settings:
     allow_unverified_bootstrap: bool
     unsafe_allow_exec: bool
     unsafe_allow_special_paths: bool
+    openai_api_key: str
+    console_shell: str
+    console_cwd: str
     audit_log_path: Path
     backup_root: Path
 
@@ -114,6 +117,9 @@ class Settings:
                 os.getenv("HACTRL_UNSAFE_ALLOW_SPECIAL_PATHS", options.get("unsafe_allow_special_paths", False)),
                 False,
             ),
+            openai_api_key=str(os.getenv("OPENAI_API_KEY", options.get("openai_api_key", ""))).strip(),
+            console_shell=str(os.getenv("HACTRL_CONSOLE_SHELL", options.get("console_shell", "/bin/sh"))).strip(),
+            console_cwd=str(os.getenv("HACTRL_CONSOLE_CWD", options.get("console_cwd", "/homeassistant"))).strip(),
             audit_log_path=Path(os.getenv("HACTRL_AUDIT_LOG", "/share/ha-control/audit.log")),
             backup_root=Path(os.getenv("HACTRL_BACKUP_ROOT", "/backup/ha-control")),
         )
