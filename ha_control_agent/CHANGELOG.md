@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Switched add-on runtime base image to `python:3.12-alpine` (no s6 overlay), avoiding `s6-overlay-suexec: can only run as pid 1` when `host_pid: true` + `protected: false`.
+
 ## 0.1.7
 
 - Removed `with-contenv` runtime wrapper to avoid `s6-overlay-suexec: can only run as pid 1` restart loops.
