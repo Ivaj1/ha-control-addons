@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 OPTIONS_PATH = Path("/data/options.json")
+S6_ENV_DIR = Path("/run/s6/container_environment")
 DEFAULT_TRUSTED_CIDRS = [
     "127.0.0.1/32",
     "10.0.0.0/8",
@@ -44,12 +45,24 @@ def _read_options() -> dict[str, Any]:
         return {}
 
 
+def _read_s6_env(name: str) -> str:
+    path = S6_ENV_DIR / name
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip("\x00\r\n ")
+    except OSError:
+        return ""
+
+
 def _read_supervisor_token(options: dict[str, Any]) -> str:
     token_sources = [
         os.getenv("HACTRL_SUPERVISOR_TOKEN"),
         options.get("supervisor_token"),
         os.getenv("SUPERVISOR_TOKEN"),
         os.getenv("HASSIO_TOKEN"),
+        _read_s6_env("SUPERVISOR_TOKEN"),
+        _read_s6_env("HASSIO_TOKEN"),
     ]
     for token in token_sources:
         if token:

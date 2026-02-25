@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Removed `with-contenv` runtime wrapper to avoid `s6-overlay-suexec: can only run as pid 1` restart loops.
+- Added fallback token discovery from s6 container environment files (`/run/s6/container_environment/SUPERVISOR_TOKEN` and `HASSIO_TOKEN`).
+
 ## 0.1.6
 
 - Added `SYS_ADMIN` capability to enable host namespace operations (`nsenter`) for full CLI control.
