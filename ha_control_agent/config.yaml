@@ -1,7 +1,7 @@
 name: HA Control Agent
 slug: ha_control_agent
 description: Full-control LAN agent for Home Assistant OS (host, Supervisor, Core, filesystem, and CLI orchestration)
-version: 0.2.6
+version: 0.2.7
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent
 startup: services
 boot: manual
@@ -53,6 +53,12 @@ options:
   supervisor_token: ""
   openai_api_key: ""
   codex_home: /share/codex
+  webdav_enabled: true
+  webdav_username: admin
+  webdav_password: ""
+  webdav_root: /
+  webdav_host_namespace: true
+  webdav_read_only: false
   console_shell: /bin/sh
   console_cwd: /homeassistant
   console_host_namespace: false
@@ -66,6 +72,12 @@ schema:
   supervisor_token: str?
   openai_api_key: password?
   codex_home: str
+  webdav_enabled: bool
+  webdav_username: str
+  webdav_password: password?
+  webdav_root: str
+  webdav_host_namespace: bool
+  webdav_read_only: bool
   console_shell: str
   console_cwd: str
   console_host_namespace: bool

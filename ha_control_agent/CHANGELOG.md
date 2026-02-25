@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Added WebDAV server endpoints under `/webdav` for Windows Explorer-style file browsing/editing.
+- Added WebDAV add-on options: `webdav_enabled`, `webdav_username`, `webdav_password`, `webdav_root`, `webdav_host_namespace`, `webdav_read_only`.
+- Added Codex bootstrap `AGENTS.md` and `agent.md` in `$CODEX_HOME` with Home Assistant + skill usage instructions.
+
 ## 0.2.6
 
 - Bundled and installed `ha-control-cli` inside the add-on image.

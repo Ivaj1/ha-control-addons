@@ -83,6 +83,12 @@ class Settings:
     unsafe_allow_special_paths: bool
     openai_api_key: str
     codex_home: str
+    webdav_enabled: bool
+    webdav_username: str
+    webdav_password: str
+    webdav_root: str
+    webdav_host_namespace: bool
+    webdav_read_only: bool
     console_shell: str
     console_cwd: str
     console_host_namespace: bool
@@ -121,6 +127,18 @@ class Settings:
             ),
             openai_api_key=str(os.getenv("OPENAI_API_KEY", options.get("openai_api_key", ""))).strip(),
             codex_home=str(os.getenv("CODEX_HOME", options.get("codex_home", "/share/codex"))).strip(),
+            webdav_enabled=_to_bool(os.getenv("HACTRL_WEBDAV_ENABLED", options.get("webdav_enabled", True)), True),
+            webdav_username=str(os.getenv("HACTRL_WEBDAV_USERNAME", options.get("webdav_username", "admin"))).strip(),
+            webdav_password=str(os.getenv("HACTRL_WEBDAV_PASSWORD", options.get("webdav_password", ""))).strip(),
+            webdav_root=str(os.getenv("HACTRL_WEBDAV_ROOT", options.get("webdav_root", "/"))).strip() or "/",
+            webdav_host_namespace=_to_bool(
+                os.getenv("HACTRL_WEBDAV_HOST_NAMESPACE", options.get("webdav_host_namespace", True)),
+                True,
+            ),
+            webdav_read_only=_to_bool(
+                os.getenv("HACTRL_WEBDAV_READ_ONLY", options.get("webdav_read_only", False)),
+                False,
+            ),
             console_shell=str(os.getenv("HACTRL_CONSOLE_SHELL", options.get("console_shell", "/bin/sh"))).strip(),
             console_cwd=str(os.getenv("HACTRL_CONSOLE_CWD", options.get("console_cwd", "/homeassistant"))).strip(),
             console_host_namespace=_to_bool(

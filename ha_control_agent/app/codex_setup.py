@@ -31,15 +31,21 @@ def ensure_codex_home() -> dict[str, str | bool]:
 
     if not agents_file.exists():
         agents_file.write_text(
-            "# AGENTS\n\n"
-            "- Skills path: `$CODEX_HOME/skills`\n"
-            "- This folder is persistent on Home Assistant (`/share/codex`).\n",
+            "# AGENTS.md\n\n"
+            "You are working inside a Home Assistant environment.\n\n"
+            "Rules:\n"
+            "- Always check and use skills from `$CODEX_HOME/skills` first.\n"
+            "- Prefer the `haos-full-control` skill for Home Assistant OS tasks.\n"
+            "- Assume the active project context is Home Assistant and related add-ons.\n"
+            "- Keep changes safe, reversible, and auditable.\n",
             encoding="utf-8",
         )
+    agent_file = codex_home / "agent.md"
+    if not agent_file.exists():
+        agent_file.write_text(agents_file.read_text(encoding="utf-8"), encoding="utf-8")
 
     return {
         "codex_home": str(codex_home),
         "skills_dir": str(skills_dir),
         "default_skills_copied": default_copied,
     }
-

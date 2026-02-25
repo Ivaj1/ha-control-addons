@@ -34,6 +34,14 @@ Privileged Home Assistant OS add-on that exposes a local control-plane API for f
 - `codex_home` defaults to `/share/codex` (persistent).
 - On startup, the add-on creates `$codex_home/skills` and seeds bundled default skills.
 - `ha-control` CLI is bundled in the image and available directly in the add-on console.
+- On startup, `$codex_home/AGENTS.md` and `$codex_home/agent.md` are created to instruct Codex to use skills and Home Assistant context.
+
+## WebDAV (Windows Explorer)
+
+- Endpoint: `http://<HA_IP>:9123/webdav/`
+- Authentication: Basic auth using add-on options `webdav_username` + `webdav_password`.
+- Full filesystem exposure when `webdav_host_namespace: true` and `webdav_root: /`.
+- Optional safety mode: `webdav_read_only: true`.
 
 ## Security posture
 

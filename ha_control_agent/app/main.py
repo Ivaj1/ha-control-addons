@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import UTC, datetime
+from email.utils import formatdate
 import fcntl
 import json
 import os
+import posixpath
 from pathlib import Path
 import pty
 import signal
@@ -14,6 +17,7 @@ import shutil
 import struct
 import termios
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
@@ -24,6 +28,7 @@ from .codex_setup import ensure_codex_home
 from .config import settings
 from .filesystem import delete_path, move_path, read_file, tree, write_file
 from .host_exec import run_command
+from .host_exec import run_simple_host_command
 from .models import (
     AuthTokenRequest,
     AuthTokenResponse,
@@ -39,7 +44,7 @@ from .security import SessionInfo, is_trusted_ip, require_session, require_trust
 from .ws_message import build_ws_message
 from .ws_bridge import WebSocketBridgeError, send_core_ws
 
-AGENT_VERSION = "0.2.6"
+AGENT_VERSION = "0.2.7"
 
 app = FastAPI(title="HA Control Agent", version=AGENT_VERSION)
 codex_runtime: dict[str, str | bool] = {}
@@ -309,6 +314,184 @@ def _set_pty_size(fd: int, cols: int, rows: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
 
+def _webdav_root_norm() -> str:
+    root = settings.webdav_root.strip() or "/"
+    root = posixpath.normpath(root)
+    if not root.startswith("/"):
+        root = f"/{root}"
+    return root
+
+
+def _resolve_webdav_target(dav_path: str) -> str:
+    root = _webdav_root_norm()
+    normalized = posixpath.normpath("/" + (dav_path or ""))
+    target = posixpath.normpath(posixpath.join(root, normalized.lstrip("/")))
+    if root != "/" and not (target == root or target.startswith(root + "/")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Path escapes WebDAV root")
+    return target
+
+
+def _target_to_virtual(target: str) -> str:
+    root = _webdav_root_norm()
+    if root == "/":
+        return target
+    if target == root:
+        return "/"
+    suffix = target[len(root) :]
+    return suffix if suffix.startswith("/") else f"/{suffix}"
+
+
+def _webdav_href(request: Request, target: str, *, is_dir: bool) -> str:
+    virtual = _target_to_virtual(target)
+    encoded = quote(virtual.lstrip("/"), safe="/")
+    base = request.url.path.rstrip("/")
+    if "/webdav" not in base:
+        base = "/webdav"
+    else:
+        base = base[: base.find("/webdav") + len("/webdav")]
+    href = f"{base}/{encoded}" if encoded else f"{base}/"
+    if is_dir and not href.endswith("/"):
+        href += "/"
+    return href
+
+
+def _run_path_command(
+    argv: list[str],
+    *,
+    host_namespace: bool,
+    timeout_s: int = 30,
+    stdin: bytes | None = None,
+) -> tuple[int, bytes, str]:
+    if host_namespace:
+        res = run_simple_host_command(argv, timeout_s=timeout_s, stdin=stdin)
+        return res.returncode, res.stdout, res.stderr.decode("utf-8", errors="replace")
+
+    import subprocess
+
+    try:
+        res = subprocess.run(  # noqa: S603
+            argv,
+            input=stdin,
+            capture_output=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as err:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Command timed out") from err
+    return res.returncode, res.stdout, res.stderr.decode("utf-8", errors="replace")
+
+
+def _webdav_stat(path: str, *, host_namespace: bool) -> dict[str, Any] | None:
+    rc, stdout, _stderr = _run_path_command(
+        ["sh", "-c", 'if [ -d "$1" ]; then echo dir; elif [ -f "$1" ]; then echo file; else echo none; fi', "sh", path],
+        host_namespace=host_namespace,
+        timeout_s=10,
+    )
+    if rc != 0:
+        return None
+    kind = stdout.decode("utf-8", errors="replace").strip()
+    if kind == "none":
+        return None
+
+    size = 0
+    mtime = int(datetime.now(tz=UTC).timestamp())
+    rc_stat, out_stat, _ = _run_path_command(
+        ["sh", "-c", 'stat -c "%s|%Y" "$1" 2>/dev/null || echo "0|0"', "sh", path],
+        host_namespace=host_namespace,
+        timeout_s=10,
+    )
+    if rc_stat == 0 and out_stat:
+        raw = out_stat.decode("utf-8", errors="replace").strip().split("|", 1)
+        if len(raw) == 2:
+            try:
+                size = int(raw[0]) if kind == "file" else 0
+                mtime = int(raw[1]) if int(raw[1]) > 0 else mtime
+            except ValueError:
+                pass
+
+    return {"path": path, "type": kind, "size": size, "mtime": mtime}
+
+
+def _webdav_list_dir(path: str, *, host_namespace: bool) -> list[dict[str, Any]]:
+    rc, stdout, stderr = _run_path_command(
+        ["find", path, "-mindepth", "1", "-maxdepth", "1", "-print0"],
+        host_namespace=host_namespace,
+        timeout_s=30,
+    )
+    if rc != 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to list directory")
+    result: list[dict[str, Any]] = []
+    for raw in stdout.split(b"\x00"):
+        candidate = raw.decode("utf-8", errors="replace").strip()
+        if not candidate:
+            continue
+        stat = _webdav_stat(candidate, host_namespace=host_namespace)
+        if stat:
+            result.append(stat)
+    return result
+
+
+def _webdav_xml_multistatus(request: Request, entries: list[dict[str, Any]]) -> str:
+    items: list[str] = []
+    for entry in entries:
+        href = _webdav_href(request, entry["path"], is_dir=entry["type"] == "dir")
+        is_dir = entry["type"] == "dir"
+        resourcetype = "<D:collection/>" if is_dir else ""
+        content_type = "<D:getcontenttype>httpd/unix-directory</D:getcontenttype>" if is_dir else "<D:getcontenttype>application/octet-stream</D:getcontenttype>"
+        content_len = "" if is_dir else f"<D:getcontentlength>{entry['size']}</D:getcontentlength>"
+        modified = formatdate(entry["mtime"], usegmt=True)
+        items.append(
+            "<D:response>"
+            f"<D:href>{href}</D:href>"
+            "<D:propstat><D:prop>"
+            f"<D:resourcetype>{resourcetype}</D:resourcetype>"
+            f"{content_type}"
+            f"{content_len}"
+            f"<D:getlastmodified>{modified}</D:getlastmodified>"
+            "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>"
+            "</D:response>"
+        )
+    return '<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:">' + "".join(items) + "</D:multistatus>"
+
+
+def _require_webdav_auth(request: Request, authorization: str | None) -> str:
+    require_trusted_network(request)
+    bearer = validate_bearer_token(authorization)
+    if bearer:
+        return bearer.subject
+
+    if not settings.webdav_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="WebDAV disabled")
+
+    if not settings.webdav_username or not settings.webdav_password:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Set webdav_username/webdav_password in add-on options")
+
+    if not authorization or not authorization.lower().startswith("basic "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing WebDAV credentials",
+            headers={"WWW-Authenticate": 'Basic realm="ha-control-webdav"'},
+        )
+
+    try:
+        decoded = base64.b64decode(authorization.split(" ", 1)[1]).decode("utf-8")
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid WebDAV credentials",
+            headers={"WWW-Authenticate": 'Basic realm="ha-control-webdav"'},
+        ) from err
+
+    username, _, password = decoded.partition(":")
+    if username != settings.webdav_username or password != settings.webdav_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid WebDAV credentials",
+            headers={"WWW-Authenticate": 'Basic realm="ha-control-webdav"'},
+        )
+    return f"webdav:{username}"
+
+
 async def _verify_long_lived_token(token: str) -> tuple[bool, str]:
     if settings.allow_unverified_bootstrap:
         return True, "Validation bypassed by settings"
@@ -477,6 +660,158 @@ async def console_ws(websocket: WebSocket) -> None:
             os.close(master_fd)
         except OSError:
             pass
+
+
+@app.api_route(
+    "/webdav",
+    methods=["OPTIONS", "PROPFIND", "GET", "HEAD", "PUT", "DELETE", "MKCOL", "MOVE"],
+)
+@app.api_route(
+    "/webdav/{dav_path:path}",
+    methods=["OPTIONS", "PROPFIND", "GET", "HEAD", "PUT", "DELETE", "MKCOL", "MOVE"],
+)
+async def webdav_dispatch(
+    request: Request,
+    dav_path: str = "",
+    authorization: str | None = Header(default=None),
+    destination: str | None = Header(default=None),
+) -> Response:
+    actor = _require_webdav_auth(request, authorization)
+    if not settings.webdav_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="WebDAV disabled")
+
+    method = request.method.upper()
+    path = unquote(dav_path or "")
+    target = _resolve_webdav_target(path)
+    host_namespace = settings.webdav_host_namespace
+
+    if settings.webdav_read_only and method in {"PUT", "DELETE", "MKCOL", "MOVE"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="WebDAV is read-only")
+
+    if method == "OPTIONS":
+        response = Response(status_code=status.HTTP_200_OK)
+        response.headers["DAV"] = "1,2"
+        response.headers["MS-Author-Via"] = "DAV"
+        response.headers["Allow"] = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE"
+        return response
+
+    if method == "PROPFIND":
+        depth = request.headers.get("depth", "1").strip().lower()
+        current = _webdav_stat(target, host_namespace=host_namespace)
+        if current is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Path not found")
+        entries = [current]
+        if current["type"] == "dir" and depth != "0":
+            entries.extend(_webdav_list_dir(target, host_namespace=host_namespace))
+        xml = _webdav_xml_multistatus(request, entries)
+        return Response(content=xml, status_code=207, media_type="application/xml; charset=utf-8")
+
+    if method in {"GET", "HEAD"}:
+        info = _webdav_stat(target, host_namespace=host_namespace)
+        if info is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Path not found")
+        if info["type"] == "dir":
+            raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Cannot GET a directory")
+        code, stdout, stderr = _run_path_command(["cat", target], host_namespace=host_namespace, timeout_s=120)
+        if code != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to read file")
+        body = b"" if method == "HEAD" else stdout
+        response = Response(content=body, status_code=status.HTTP_200_OK, media_type="application/octet-stream")
+        response.headers["Content-Length"] = str(len(stdout))
+        return response
+
+    if method == "PUT":
+        existed = _webdav_stat(target, host_namespace=host_namespace) is not None
+        payload = await request.body()
+        parent = posixpath.dirname(target) or "/"
+        code_mkdir, _out_mkdir, err_mkdir = _run_path_command(["mkdir", "-p", parent], host_namespace=host_namespace)
+        if code_mkdir != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_mkdir or "Failed to create parent directory")
+        code, _stdout, stderr = _run_path_command(
+            ["sh", "-c", 'cat > "$1"', "sh", target],
+            host_namespace=host_namespace,
+            timeout_s=120,
+            stdin=payload,
+        )
+        if code != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to write file")
+        write_audit_entry(
+            actor=actor,
+            source_ip=_source_ip(request),
+            action="webdav.put",
+            target=target,
+            details={"bytes": len(payload), "host_namespace": host_namespace},
+            success=True,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT if existed else status.HTTP_201_CREATED)
+
+    if method == "MKCOL":
+        if _webdav_stat(target, host_namespace=host_namespace) is not None:
+            raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Path already exists")
+        code, _stdout, stderr = _run_path_command(["mkdir", "-p", target], host_namespace=host_namespace)
+        if code != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to create directory")
+        write_audit_entry(
+            actor=actor,
+            source_ip=_source_ip(request),
+            action="webdav.mkcol",
+            target=target,
+            details={"host_namespace": host_namespace},
+            success=True,
+        )
+        return Response(status_code=status.HTTP_201_CREATED)
+
+    if method == "DELETE":
+        info = _webdav_stat(target, host_namespace=host_namespace)
+        if info is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Path not found")
+        code, _stdout, stderr = _run_path_command(["rm", "-rf", target], host_namespace=host_namespace, timeout_s=120)
+        if code != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to delete path")
+        write_audit_entry(
+            actor=actor,
+            source_ip=_source_ip(request),
+            action="webdav.delete",
+            target=target,
+            details={"host_namespace": host_namespace, "type": info["type"]},
+            success=True,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    if method == "MOVE":
+        if not destination:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Destination header")
+        parsed = urlparse(destination)
+        dst_path = parsed.path or ""
+        webdav_prefix = "/webdav"
+        if webdav_prefix in dst_path:
+            dst_rel = dst_path.split(webdav_prefix, 1)[1].lstrip("/")
+        else:
+            dst_rel = dst_path.lstrip("/")
+        dst_target = _resolve_webdav_target(unquote(dst_rel))
+
+        src_info = _webdav_stat(target, host_namespace=host_namespace)
+        if src_info is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source path not found")
+        dst_existed = _webdav_stat(dst_target, host_namespace=host_namespace) is not None
+        parent = posixpath.dirname(dst_target) or "/"
+        code_mkdir, _out_mkdir, err_mkdir = _run_path_command(["mkdir", "-p", parent], host_namespace=host_namespace)
+        if code_mkdir != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_mkdir or "Failed to create target directory")
+        code, _stdout, stderr = _run_path_command(["mv", target, dst_target], host_namespace=host_namespace, timeout_s=120)
+        if code != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stderr or "Failed to move path")
+        write_audit_entry(
+            actor=actor,
+            source_ip=_source_ip(request),
+            action="webdav.move",
+            target=f"{target} -> {dst_target}",
+            details={"host_namespace": host_namespace},
+            success=True,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT if dst_existed else status.HTTP_201_CREATED)
+
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail="Method not allowed")
 
 
 @app.post("/v1/auth/token", response_model=AuthTokenResponse)
