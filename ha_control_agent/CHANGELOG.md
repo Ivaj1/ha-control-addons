@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- Launch agent with `with-contenv` so s6-provided environment variables (`SUPERVISOR_TOKEN` / `HASSIO_TOKEN`) are available to Uvicorn process.
+
 ## 0.1.4
 
 - Added proxy-level guard to reject Supervisor/Core proxy calls when Supervisor token is missing, preventing invalid `Bearer ` headers.
