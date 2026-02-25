@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Added `SYS_ADMIN` capability to enable host namespace operations (`nsenter`) for full CLI control.
+- Added optional `supervisor_token` add-on setting as manual fallback when Supervisor env token is not injected.
+
 ## 0.1.5
 
 - Launch agent with `with-contenv` so s6-provided environment variables (`SUPERVISOR_TOKEN` / `HASSIO_TOKEN`) are available to Uvicorn process.

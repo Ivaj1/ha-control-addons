@@ -16,3 +16,6 @@ configuration:
   unsafe_allow_special_paths:
     name: Unsafe allow special paths
     description: Allow operations in /proc, /sys, /dev (unsafe).
+  supervisor_token:
+    name: Supervisor token override
+    description: Optional manual Supervisor API token override when runtime env token is unavailable.

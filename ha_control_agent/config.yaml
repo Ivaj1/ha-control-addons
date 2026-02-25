@@ -1,7 +1,7 @@
 name: HA Control Agent
 slug: ha_control_agent
 description: Full-control LAN agent for Home Assistant OS (host, Supervisor, Core, filesystem, and CLI orchestration)
-version: 0.1.5
+version: 0.1.6
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/ha_control_agent
 startup: services
 boot: manual
@@ -17,6 +17,8 @@ docker_api: true
 host_network: true
 host_pid: true
 host_dbus: true
+privileged:
+  - SYS_ADMIN
 full_access: true
 protected: false
 map:
@@ -41,6 +43,7 @@ options:
   allow_unverified_bootstrap: false
   unsafe_allow_exec: false
   unsafe_allow_special_paths: false
+  supervisor_token: ""
 schema:
   trusted_cidrs:
     - str
@@ -48,3 +51,4 @@ schema:
   allow_unverified_bootstrap: bool
   unsafe_allow_exec: bool
   unsafe_allow_special_paths: bool
+  supervisor_token: str?

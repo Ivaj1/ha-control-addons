@@ -44,6 +44,21 @@ def _read_options() -> dict[str, Any]:
         return {}
 
 
+def _read_supervisor_token(options: dict[str, Any]) -> str:
+    token_sources = [
+        os.getenv("HACTRL_SUPERVISOR_TOKEN"),
+        options.get("supervisor_token"),
+        os.getenv("SUPERVISOR_TOKEN"),
+        os.getenv("HASSIO_TOKEN"),
+    ]
+    for token in token_sources:
+        if token:
+            normalized = str(token).strip()
+            if normalized:
+                return normalized
+    return ""
+
+
 @dataclass(slots=True, frozen=True)
 class Settings:
     api_port: int
@@ -64,11 +79,7 @@ class Settings:
         if not isinstance(trusted_cidrs, list) or not trusted_cidrs:
             trusted_cidrs = DEFAULT_TRUSTED_CIDRS
 
-        supervisor_token = (
-            os.getenv("SUPERVISOR_TOKEN")
-            or os.getenv("HASSIO_TOKEN")
-            or ""
-        ).strip()
+        supervisor_token = _read_supervisor_token(options)
 
         return cls(
             api_port=_to_int(os.getenv("HACTRL_PORT", options.get("port", 9123)), 9123),

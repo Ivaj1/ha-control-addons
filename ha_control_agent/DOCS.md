@@ -33,6 +33,7 @@ High-privilege local control plane for Home Assistant OS.
 - `allow_unverified_bootstrap` (bool)
 - `unsafe_allow_exec` (bool)
 - `unsafe_allow_special_paths` (bool)
+- `supervisor_token` (optional string fallback token)
 
 ## Security warning
 
