@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.10
+
+- Fixed build on Home Assistant base image by explicitly installing `python3` and `py3-pip` before dependency install.
+
 ## 0.1.9
 
 - Fixed build failure on Home Assistant base image by using `pip3`/`python3`.

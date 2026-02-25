@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN apk add --no-cache util-linux bash coreutils findutils
+RUN apk add --no-cache python3 py3-pip util-linux bash coreutils findutils
 
 WORKDIR /app
 
