@@ -35,6 +35,15 @@ def _source_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _require_supervisor_token() -> None:
+    if settings.supervisor_token:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Supervisor token is unavailable in add-on runtime (SUPERVISOR_TOKEN/HASSIO_TOKEN missing)",
+    )
+
+
 async def _verify_long_lived_token(token: str) -> tuple[bool, str]:
     if settings.allow_unverified_bootstrap:
         return True, "Validation bypassed by settings"
@@ -263,6 +272,7 @@ async def core_ws(
     body: CoreWSRequest,
     session: SessionInfo = Depends(require_session),
 ) -> dict[str, Any]:
+    _require_supervisor_token()
     message = _build_ws_message(body)
     try:
         result = await send_core_ws(message, timeout_s=body.timeout_s)
@@ -314,6 +324,7 @@ async def proxy_supervisor(
     path: str = "",
     session: SessionInfo = Depends(require_session),
 ) -> Response:
+    _require_supervisor_token()
     body = await _proxy_body(request)
     headers = {key: value for key, value in request.headers.items() if key.lower() in {"content-type", "accept"}}
     resp = await request_supervisor(
@@ -341,6 +352,7 @@ async def proxy_core_rest(
     path: str = "",
     session: SessionInfo = Depends(require_session),
 ) -> Response:
+    _require_supervisor_token()
     body = await _proxy_body(request)
     headers = {key: value for key, value in request.headers.items() if key.lower() in {"content-type", "accept"}}
     resp = await request_core_rest(

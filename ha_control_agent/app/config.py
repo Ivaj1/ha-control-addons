@@ -64,9 +64,15 @@ class Settings:
         if not isinstance(trusted_cidrs, list) or not trusted_cidrs:
             trusted_cidrs = DEFAULT_TRUSTED_CIDRS
 
+        supervisor_token = (
+            os.getenv("SUPERVISOR_TOKEN")
+            or os.getenv("HASSIO_TOKEN")
+            or ""
+        ).strip()
+
         return cls(
             api_port=_to_int(os.getenv("HACTRL_PORT", options.get("port", 9123)), 9123),
-            supervisor_token=os.getenv("SUPERVISOR_TOKEN", ""),
+            supervisor_token=supervisor_token,
             trusted_cidrs=[str(c) for c in trusted_cidrs],
             session_ttl_seconds=_to_int(
                 os.getenv("HACTRL_SESSION_TTL", options.get("session_ttl_seconds", 43200)),

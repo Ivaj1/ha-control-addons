@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Read Supervisor token from `SUPERVISOR_TOKEN` or legacy `HASSIO_TOKEN`.
+- Return clear `503` error when Supervisor token is missing instead of sending an empty Authorization header.
+
 ## 0.1.2
 
 - Disabled AppArmor profile for this add-on (`apparmor: false`) to allow required host namespace operations (`nsenter`).
