@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from fastapi import HTTPException, status
 
 from .config import settings
 
@@ -30,6 +31,11 @@ async def request_supervisor(
     headers: dict[str, str] | None,
     query: dict[str, str] | None,
 ) -> httpx.Response:
+    if not settings.supervisor_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supervisor token unavailable in add-on runtime",
+        )
     url = _compose_url("http://supervisor", path, query)
 
     req_headers = {"Authorization": f"Bearer {settings.supervisor_token}"}
@@ -54,6 +60,11 @@ async def request_core_rest(
     headers: dict[str, str] | None,
     query: dict[str, str] | None,
 ) -> httpx.Response:
+    if not settings.supervisor_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supervisor token unavailable in add-on runtime",
+        )
     url = _compose_url("http://supervisor/core/api", path, query)
 
     req_headers = {"Authorization": f"Bearer {settings.supervisor_token}"}

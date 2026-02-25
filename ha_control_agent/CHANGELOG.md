@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Added proxy-level guard to reject Supervisor/Core proxy calls when Supervisor token is missing, preventing invalid `Bearer ` headers.
+
 ## 0.1.3
 
 - Read Supervisor token from `SUPERVISOR_TOKEN` or legacy `HASSIO_TOKEN`.
