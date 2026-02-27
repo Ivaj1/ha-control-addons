@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+- Pixel-focused redesign to replicate Home Assistant Devices panel layout:
+  - top navigation tabs
+  - left filter sidebar sections
+  - search + group/order toolbar
+  - dark table styling with grouped rows
+  - floating action button style
+  - column customization modal style
+  - entity details right drawer
+- Added client-side multi-filter behavior by:
+  - areas
+  - integrations
+  - state
+  - tags
+
 ## 0.6.0
 
 - Database detection aligned with `hass-dbstats` approach:

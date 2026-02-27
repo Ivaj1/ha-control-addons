@@ -864,106 +864,950 @@ async def api_apply() -> dict[str, Any]:
 async def index() -> HTMLResponse:
     return HTMLResponse(
         """
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Recorder Studio</title>
-<style>
-:root{--bg:#0f1117;--panel:#171b23;--line:#2a3240;--ink:#e6edf7;--muted:#9aa5b5;--accent:#4dabf7;--ok:#27ae60;--warn:#f39c12;--danger:#e74c3c}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0%,#1a2030,#0f1117 45%);color:var(--ink);font-family:Roboto,"Segoe UI",sans-serif}
-.wrap{max-width:1280px;margin:0 auto;padding:14px;display:grid;gap:12px}.card{background:linear-gradient(180deg,#1b2230,#171b23);border:1px solid var(--line);border-radius:12px;padding:12px}
-h1,h2{margin:0}.muted{color:var(--muted)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-.chip{border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:.82rem;background:#141925}.ok{color:var(--ok)}.warn{color:var(--warn)}
-input,select{background:#111622;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px}.grow{flex:1;min-width:180px}
-button{border:1px solid transparent;border-radius:8px;padding:8px 10px;color:#fff;background:var(--accent);cursor:pointer}.ghost{background:#64748b}.danger{background:var(--danger)}.okb{background:var(--ok)}.warnb{background:var(--warn)}
-.layout{display:grid;grid-template-columns:1.7fr 1fr;gap:12px}.table-wrap{max-height:58vh;overflow:auto;border:1px solid var(--line);border-radius:10px}
-table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{padding:8px;border-bottom:1px solid #232a37}th{position:sticky;top:0;background:#151b27;text-align:left;cursor:pointer}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace}.clickable{color:#8bc4ff;cursor:pointer}.side dt{font-size:.78rem;color:var(--muted)}.side dd{margin:0 0 8px}
-@media (max-width:1100px){.layout{grid-template-columns:1fr}}
-</style></head><body>
-<main class="wrap">
-  <section class="card">
-    <h1>Recorder Studio</h1><div class="muted">Gestión visual de recorder: filtros por entidad, purge y métricas.</div>
-    <div class="chips"><span id="setupChip" class="chip">setup</span><span id="recChip" class="chip">recorder</span><span id="modeChip" class="chip">metrics</span><span id="countChip" class="chip">0</span></div>
-  </section>
-  <section class="card row">
-    <input id="search" class="grow" placeholder="Buscar entidad o nombre">
-    <select id="domainFilter"><option value="all">Todos los dominios</option></select>
-    <select id="excludedFilter"><option value="all">Incluidas + Excluidas</option><option value="included">Solo incluidas</option><option value="excluded">Solo excluidas</option></select>
-    <select id="windowHours"><option value="1">1h</option><option value="6">6h</option><option value="24" selected>24h</option><option value="72">72h</option><option value="168">7d</option></select>
-    <select id="sortBy"><option value="state_changes">Cambios</option><option value="changes_per_hour">Cambios/h</option><option value="last_updated_ts">Última escritura</option><option value="entity_id">Entidad</option><option value="friendly_name">Nombre</option><option value="domain">Dominio</option></select>
-    <select id="sortDir"><option value="desc">Desc</option><option value="asc">Asc</option></select>
-    <button onclick="loadEntities()">Aplicar</button><button class="ghost" onclick="refreshAll()">Actualizar</button>
-    <button class="warnb" onclick="applyChanges()">Aplicar configuración (reiniciar HA)</button>
-  </section>
-  <section class="layout">
-    <div class="card">
-      <div class="row" style="margin-bottom:8px">
-        <button class="okb" onclick="setRecorder(true)">Activar recorder</button><button class="danger" onclick="setRecorder(false)">Desactivar recorder</button>
-        <input id="purgeKeepDays" type="number" min="1" max="3650" value="10"><label><input id="purgeRepack" type="checkbox"> repack</label><label><input id="purgeApplyFilter" type="checkbox"> apply_filter</label>
-        <button class="warnb" onclick="purgeGlobal()">Purge global</button>
-      </div>
-      <div class="row" style="margin-bottom:8px">
-        <input id="purgeEntitiesKeepDays" type="number" min="0" max="3650" value="0"><input id="purgeDomains" class="grow" placeholder="domains separados por coma"><input id="purgeGlobs" class="grow" placeholder="entity_globs separados por coma">
-        <button class="danger" onclick="purgeSelected()">Purge selección</button><button class="ghost" onclick="clearSelection()">Limpiar selección</button>
-      </div>
-      <div class="table-wrap"><table><thead><tr><th>Sel</th><th data-sort="entity_id">Entidad</th><th data-sort="friendly_name">Nombre</th><th data-sort="domain">Dom</th><th data-sort="state_changes">Cambios</th><th data-sort="changes_per_hour">/h</th><th data-sort="last_updated_ts">Última</th><th>Recorder</th><th>Acción</th></tr></thead><tbody id="tbody"><tr><td colspan="9" class="muted">Cargando...</td></tr></tbody></table></div>
-    </div>
-    <aside class="card side">
-      <h2>Detalle entidad</h2><div id="detailEmpty" class="muted">Haz click en una entidad para ver detalle.</div>
-      <div id="detail" style="display:none">
-        <div id="dEntity" class="mono"></div><div id="dName"></div><div id="dState" class="row" style="margin:8px 0"></div>
-        <dl><dt>1h</dt><dd id="d1h"></dd><dt>24h</dt><dd id="d24h"></dd><dt>7d</dt><dd id="d7d"></dd><dt>Último cambio</dt><dd id="dLastChanged"></dd><dt>Última actualización</dt><dd id="dLastUpdated"></dd></dl>
-        <div class="row"><button id="dOpenHA">Abrir en Home Assistant</button><button class="ghost" id="dToggle">Toggle incluir/excluir</button></div>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recorder Control</title>
+  <style>
+    :root {
+      --bg: #111317;
+      --panel: #171a1f;
+      --panel-2: #1a1d22;
+      --line: #2a2f38;
+      --line-soft: #20252d;
+      --text: #e6e8eb;
+      --muted: #a8b0bb;
+      --accent: #00b8ff;
+      --accent-bg: #073547;
+      --danger: #d35050;
+      --ok: #31b16b;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Roboto, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+    .topbar {
+      height: 56px;
+      background: #14171c;
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 64px 1fr 64px;
+      align-items: center;
+    }
+    .topbar .back {
+      justify-self: center;
+      color: #cfd5dd;
+      font-size: 24px;
+      line-height: 1;
+      user-select: none;
+    }
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: 36px;
+      align-items: center;
+    }
+    .tab {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      color: #cdd4dc;
+      font-size: 14px;
+      border-bottom: 2px solid transparent;
+      cursor: default;
+    }
+    .tab.active {
+      color: #9ee7ff;
+      border-bottom-color: var(--accent);
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      min-height: calc(100vh - 56px);
+    }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: #0f1216;
+    }
+    .sidebar-content {
+      padding-top: 8px;
+    }
+    .filters-btn {
+      margin: 8px;
+      width: calc(100% - 16px);
+      height: 40px;
+      border: 1px solid #1b4b5d;
+      border-radius: 14px;
+      background: #063345;
+      color: #ddf6ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+    .section {
+      border-top: 1px solid var(--line-soft);
+    }
+    .section-head {
+      width: 100%;
+      height: 58px;
+      background: transparent;
+      color: #e5e9ef;
+      border: 0;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 36px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .section-head small {
+      font-size: 14px;
+      margin-left: auto;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .section-items {
+      display: none;
+      padding: 8px 10px 10px 22px;
+    }
+    .section.open .section-items { display: block; }
+    .section-item {
+      display: block;
+      font-size: 13px;
+      color: #d6dbe2;
+      margin: 7px 0;
+    }
+    .main {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+    }
+    .toolbar {
+      border-bottom: 1px solid var(--line);
+      background: #13171d;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+    }
+    .chip-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      border: 1px solid var(--line);
+      background: #1a1f27;
+      color: #d0d7df;
+      display: grid;
+      place-items: center;
+    }
+    .search {
+      flex: 1;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #191d24;
+      color: var(--text);
+      padding: 0 13px;
+      font-size: 14px;
+    }
+    .menu-btn {
+      height: 34px;
+      border-radius: 11px;
+      border: 1px solid var(--line);
+      background: #22262d;
+      color: #dde4ec;
+      padding: 0 14px;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .menu {
+      position: absolute;
+      top: 48px;
+      z-index: 20;
+      width: 188px;
+      border: 1px solid #4b515d;
+      border-radius: 12px;
+      background: #1b1f25;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+      padding: 6px 0;
+      display: none;
+    }
+    .menu.show { display: block; }
+    .menu-item {
+      width: calc(100% - 12px);
+      margin: 2px 6px;
+      height: 34px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #dbe1e8;
+      text-align: left;
+      padding: 0 10px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    .menu-item.active {
+      border-color: #009edb;
+      background: #022f43;
+      color: #4ad4ff;
+    }
+    .table-wrap {
+      min-width: 0;
+      overflow: auto;
+      height: calc(100vh - 104px);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1100px;
+      font-size: 13px;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #161a20;
+      color: #d6dde5;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-weight: 600;
+      height: 40px;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+    tbody td {
+      border-bottom: 1px solid #1f242d;
+      height: 44px;
+      padding: 0 10px;
+      color: #d8dde4;
+      white-space: nowrap;
+    }
+    tbody tr:hover { background: #181d24; }
+    .col-check { width: 34px; }
+    .col-icon { width: 32px; text-align: center; color: #7fd5ff; }
+    .col-device { min-width: 260px; }
+    .device-link { color: #e8edf3; cursor: pointer; }
+    .device-link:hover { color: #87dfff; }
+    .battery { text-align: right; min-width: 70px; }
+    .group-row td {
+      height: 30px;
+      background: #10151c;
+      color: #8bc2d8;
+      font-weight: 600;
+      border-top: 1px solid #2a3340;
+      border-bottom: 1px solid #2a3340;
+    }
+    .fab {
+      position: fixed;
+      right: 16px;
+      bottom: 14px;
+      height: 42px;
+      border-radius: 22px;
+      border: 0;
+      background: #0aa9e9;
+      color: #dff8ff;
+      padding: 0 18px;
+      font-weight: 600;
+      font-size: 22px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+    }
+    .fab span { font-size: 22px; line-height: 1; }
+    .fab small { font-size: 14px; }
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+    }
+    .modal-bg.show { display: flex; }
+    .modal {
+      width: 440px;
+      max-width: calc(100vw - 22px);
+      background: #1a1d22;
+      border-radius: 24px;
+      border: 1px solid #2c333d;
+      padding: 18px 20px;
+    }
+    .modal h3 {
+      margin: 0;
+      font-size: 38px;
+      font-weight: 500;
+    }
+    .modal-top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .col-item {
+      height: 46px;
+      display: grid;
+      grid-template-columns: 28px 1fr 28px;
+      align-items: center;
+      color: #d8dde4;
+      border-bottom: 1px solid #242a33;
+      font-size: 32px;
+    }
+    .col-item .toggle {
+      justify-self: end;
+      cursor: pointer;
+      opacity: .86;
+    }
+    .modal-actions {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .link-btn {
+      border: 0;
+      background: transparent;
+      color: #0cc2ff;
+      padding: 0;
+      font-weight: 600;
+      font-size: 34px;
+    }
+    .done-btn {
+      height: 42px;
+      border-radius: 22px;
+      border: 0;
+      background: #0aa9e9;
+      color: #ebfbff;
+      padding: 0 18px;
+      font-weight: 700;
+      font-size: 34px;
+    }
+    .drawer {
+      position: fixed;
+      top: 56px;
+      right: 0;
+      width: 380px;
+      max-width: 95vw;
+      bottom: 0;
+      background: #191d23;
+      border-left: 1px solid #2d353f;
+      padding: 14px;
+      transform: translateX(100%);
+      transition: transform .22s ease;
+      z-index: 30;
+      overflow: auto;
+    }
+    .drawer.show { transform: translateX(0); }
+    .drawer h4 { margin: 0 0 8px; font-size: 34px; }
+    .drawer .label { color: var(--muted); font-size: 32px; }
+    .drawer .val { font-size: 33px; margin-bottom: 9px; }
+    .drawer .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .drawer button {
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #242a33;
+      color: #dbe4ed;
+      padding: 0 10px;
+      font-size: 32px;
+    }
+    .quick {
+      position: absolute;
+      right: 42px;
+      top: 48px;
+      background: #1b1f25;
+      border: 1px solid #444d59;
+      border-radius: 12px;
+      padding: 6px;
+      display: none;
+      z-index: 21;
+      width: 230px;
+    }
+    .quick.show { display: block; }
+    .quick button {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #dbe3ec;
+      text-align: left;
+      padding: 9px 10px;
+      font-size: 34px;
+    }
+    .quick button:hover { background: #283140; }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: fixed;
+        z-index: 50;
+        top: 56px;
+        bottom: 0;
+        width: 170px;
+        transform: translateX(-100%);
+        transition: transform .2s ease;
+      }
+      .sidebar.open { transform: translateX(0); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="back">←</div>
+    <nav class="tabs">
+      <div class="tab">Integraciones</div>
+      <div class="tab active">Dispositivos</div>
+      <div class="tab">Entidades</div>
+      <div class="tab">Ayudantes</div>
+    </nav>
+    <div style="justify-self:center;color:#cfd5dd;">⋮</div>
+  </header>
+  <div class="shell">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-content">
+        <button id="mobileFiltersBtn" class="filters-btn">☰ Filtros</button>
+        <div class="section" data-section="areas">
+          <button class="section-head" onclick="toggleSection('areas')">⌄ Áreas <small id="countAreas"></small></button>
+          <div class="section-items" id="itemsAreas"></div>
+        </div>
+        <div class="section" data-section="integrations">
+          <button class="section-head" onclick="toggleSection('integrations')">⌄ Integraciones <small id="countIntegrations"></small></button>
+          <div class="section-items" id="itemsIntegrations"></div>
+        </div>
+        <div class="section" data-section="states">
+          <button class="section-head" onclick="toggleSection('states')">⌄ Estado <small id="countStates"></small></button>
+          <div class="section-items" id="itemsStates"></div>
+        </div>
+        <div class="section" data-section="tags">
+          <button class="section-head" onclick="toggleSection('tags')">⌄ Etiquetas <small id="countTags"></small></button>
+          <div class="section-items" id="itemsTags"></div>
+        </div>
       </div>
     </aside>
-  </section>
-</main>
-<script>
-const $=id=>document.getElementById(id);const selected=new Set();let currentItems=[];let currentDetail=null;
-async function api(path,opts={}){const r=await fetch(path,opts);if(!r.ok)throw new Error(await r.text());return r.json();}
-const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
-const ts=v=>!v?"-":new Date(Number(v)*1000).toLocaleString();
-const splitCsv=t=>String(t||"").split(",").map(s=>s.trim()).filter(Boolean);
-function updateChips(s){$("setupChip").textContent=s.setup.configured?"Setup OK":"Setup pendiente";$("setupChip").className="chip "+(s.setup.configured?"ok":"warn");$("recChip").textContent=s.recorder_recording?"Recorder activo":"Recorder inactivo";$("countChip").textContent="Excluidas: "+(s.excluded_count||0);$("modeChip").textContent="Métricas: "+(s.metrics_mode||"none")}
-async function refreshStatus(){updateChips(await api("./api/status"))}
-function markSelected(id,checked){checked?selected.add(id):selected.delete(id)}
-async function loadEntities(){
-  $("tbody").innerHTML="<tr><td colspan='9' class='muted'>Cargando...</td></tr>";
-  const q=new URLSearchParams({search:$("search").value||"",hours:$("windowHours").value||"24",limit:"700",domain:$("domainFilter").value||"all",excluded:$("excludedFilter").value||"all",sort_by:$("sortBy").value||"state_changes",sort_dir:$("sortDir").value||"desc"});
-  const data=await api("./api/entities?"+q.toString());currentItems=data.items||[];
-  const domSel=$("domainFilter");if(domSel.options.length<=1){for(const d of (data.domains||[])){const o=document.createElement("option");o.value=d;o.textContent=d;domSel.appendChild(o)}}
-  if(!currentItems.length){$("tbody").innerHTML="<tr><td colspan='9' class='muted'>Sin resultados</td></tr>";return;}
-  $("tbody").innerHTML=currentItems.map(it=>`<tr>
-    <td><input type="checkbox" ${selected.has(it.entity_id)?"checked":""} onchange="markSelected('${esc(it.entity_id)}',this.checked)"></td>
-    <td class="mono clickable" onclick="openDetail('${esc(it.entity_id)}')">${esc(it.entity_id)}</td>
-    <td>${esc(it.friendly_name||"-")}</td><td>${esc(it.domain)}</td><td>${Number(it.state_changes||0)}</td><td>${Number(it.changes_per_hour||0).toFixed(2)}</td><td>${esc(ts(it.last_updated_ts))}</td>
-    <td style="color:${it.excluded_by_app?'#e74c3c':'#27ae60'}">${it.excluded_by_app?'Excluida':'Incluida'}</td>
-    <td><button onclick="toggleEntity('${esc(it.entity_id)}',${it.excluded_by_app?"false":"true"})">${it.excluded_by_app?"Incluir":"Excluir"}</button></td></tr>`).join("");
-}
-async function openDetail(entityId){
-  const d=await api("./api/entity/"+encodeURIComponent(entityId)+"/details");currentDetail=d;
-  $("detailEmpty").style.display="none";$("detail").style.display="block";$("dEntity").textContent=d.entity_id;$("dName").textContent=d.friendly_name||"-";
-  $("dState").textContent="Estado: "+(d.state??"-")+" "+(d.unit_of_measurement||"");
-  const w=d.statistics?.windows||{};$("d1h").textContent=`${w["1"]?.state_changes||0} cambios (${(w["1"]?.changes_per_hour||0).toFixed(2)}/h)`;
-  $("d24h").textContent=`${w["24"]?.state_changes||0} cambios (${(w["24"]?.changes_per_hour||0).toFixed(2)}/h)`;
-  $("d7d").textContent=`${w["168"]?.state_changes||0} cambios (${(w["168"]?.changes_per_hour||0).toFixed(2)}/h)`;
-  $("dLastChanged").textContent=d.last_changed||"-";$("dLastUpdated").textContent=d.last_updated||"-";
-  $("dOpenHA").onclick=()=>window.open(d.ha_entity_url,"_blank");
-  const row=currentItems.find(x=>x.entity_id===d.entity_id);const excluded=Boolean(row?.excluded_by_app);
-  $("dToggle").textContent=excluded?"Incluir en recorder":"Excluir de recorder";
-  $("dToggle").onclick=async()=>{await toggleEntity(d.entity_id,!excluded);}
-}
-async function toggleEntity(entityId,exclude){await api("./api/entities/"+encodeURIComponent(entityId),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({exclude})});await refreshAll()}
-async function setRecorder(enable){await api(enable?"./api/recorder/enable":"./api/recorder/disable",{method:"POST"});await refreshStatus()}
-async function purgeGlobal(){if(!confirm("Lanzar purge global?"))return;await api("./api/recorder/purge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({keep_days:Number($("purgeKeepDays").value||10),repack:Boolean($("purgeRepack").checked),apply_filter:Boolean($("purgeApplyFilter").checked)})});alert("Purge lanzado")}
-async function purgeSelected(){const entities=[...selected],domains=splitCsv($("purgeDomains").value),globs=splitCsv($("purgeGlobs").value);if(!entities.length&&!domains.length&&!globs.length){alert("Selecciona algo");return}
-if(!confirm("Lanzar purge_entities?"))return;await api("./api/recorder/purge_entities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity_ids:entities,domains:domains,entity_globs:globs,keep_days:Number($("purgeEntitiesKeepDays").value||0)})});alert("Purge_entities lanzado")}
-function clearSelection(){selected.clear();loadEntities()}
-async function applyChanges(){if(!confirm("Reiniciar Core para aplicar filtros?"))return;await api("./api/apply",{method:"POST"});alert("Reinicio solicitado")}
-async function refreshAll(){try{await refreshStatus();await loadEntities()}catch(e){$("tbody").innerHTML=`<tr><td colspan="9">${esc(e.message)}</td></tr>`}}
-["search","windowHours","domainFilter","excludedFilter","sortBy","sortDir"].forEach(id=>$(id).addEventListener("change",loadEntities));$("search").addEventListener("keydown",e=>{if(e.key==="Enter")loadEntities()});
-document.querySelectorAll("th[data-sort]").forEach(th=>th.addEventListener("click",()=>{$("sortBy").value=th.dataset.sort;$("sortDir").value=$("sortDir").value==="asc"?"desc":"asc";loadEntities()}));
-refreshAll();
-</script></body></html>
+    <main class="main">
+      <div class="toolbar">
+        <button class="chip-icon" onclick="toggleSidebar()">☰</button>
+        <input id="search" class="search" placeholder="Buscar dispositivos">
+        <button id="groupBtn" class="menu-btn" onclick="toggleMenu('groupMenu')">Agrupar por <span>▾</span></button>
+        <button id="sortBtn" class="menu-btn" onclick="toggleMenu('sortMenu')">Ordenar por Área <span>▾</span></button>
+        <button class="chip-icon" onclick="openCustomize()">▦</button>
+        <button class="chip-icon" onclick="toggleQuickMenu()">⋮</button>
+        <div id="groupMenu" class="menu"></div>
+        <div id="sortMenu" class="menu"></div>
+        <div id="quickMenu" class="quick">
+          <button onclick="setRecorder(true)">Activar recorder</button>
+          <button onclick="setRecorder(false)">Desactivar recorder</button>
+          <button onclick="purgeGlobal()">Purge global</button>
+          <button onclick="purgeSelected()">Purge entidades seleccionadas</button>
+          <button onclick="applyChanges()">Aplicar filtros (reiniciar HA)</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr id="tableHead"></tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="12">Cargando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <button class="fab"><span>＋</span><small>Añadir dispositivo</small></button>
+
+  <div id="customizeModalBg" class="modal-bg">
+    <div class="modal">
+      <div class="modal-top"><span style="font-size:38px;cursor:pointer" onclick="closeCustomize()">✕</span><h3>Personalizar</h3></div>
+      <div id="columnsList"></div>
+      <div class="modal-actions">
+        <button class="link-btn" onclick="restoreColumns()">Restaurar los valores predeterminados</button>
+        <button class="done-btn" onclick="closeCustomize()">Hecho</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="entityDrawer" class="drawer">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h4>Entidad</h4>
+      <button onclick="closeDrawer()" style="background:transparent;border:0;color:#dbe4ed;font-size:34px;cursor:pointer">✕</button>
+    </div>
+    <div class="label">ID</div><div id="dEntityId" class="val mono"></div>
+    <div class="label">Nombre</div><div id="dName" class="val"></div>
+    <div class="label">Estado actual</div><div id="dState" class="val"></div>
+    <div class="label">1h</div><div id="d1h" class="val"></div>
+    <div class="label">24h</div><div id="d24h" class="val"></div>
+    <div class="label">7d</div><div id="d7d" class="val"></div>
+    <div class="label">Último cambio</div><div id="dLastChanged" class="val"></div>
+    <div class="label">Última actualización</div><div id="dLastUpdated" class="val"></div>
+    <div class="actions">
+      <button id="dOpenHA">Abrir en Home Assistant</button>
+      <button id="dToggleExclusion">Toggle recorder</button>
+    </div>
+  </aside>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    const ts = (v) => !v ? "—" : new Date(Number(v) * 1000).toLocaleString();
+    const splitCsv = (t) => String(t || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+    const columnsDefault = [
+      { key: "icon", label: "Icono" },
+      { key: "device", label: "Dispositivo" },
+      { key: "area", label: "Área" },
+      { key: "integration", label: "Integración" },
+      { key: "manufacturer", label: "Fabricante" },
+      { key: "model", label: "Modelo" },
+      { key: "battery", label: "Batería" }
+    ];
+    const state = {
+      all: [],
+      rows: [],
+      selected: new Set(),
+      filters: { areas: new Set(), integrations: new Set(), states: new Set(), tags: new Set() },
+      catalog: { areas: [], integrations: [], states: [], tags: [] },
+      sectionsOpen: { areas: false, integrations: false, states: false, tags: false },
+      groupBy: "none",
+      sortBy: "area",
+      sortDir: "asc",
+      search: "",
+      hours: 24,
+      visibleColumns: columnsDefault.map((c) => c.key),
+      currentDetail: null
+    };
+
+    const groupOptions = [
+      ["none", "No agrupar"],
+      ["area", "Área"],
+      ["integration", "Integración"],
+      ["manufacturer", "Fabricante"],
+      ["state", "Estado"]
+    ];
+    const sortOptions = [
+      ["device", "Dispositivo"],
+      ["area", "Área"],
+      ["integration", "Integración"],
+      ["manufacturer", "Fabricante"],
+      ["model", "Modelo"],
+      ["battery", "Batería"],
+      ["state", "Estado"],
+      ["state_changes", "Cambios"],
+      ["changes_per_hour", "Cambios/h"],
+      ["last_updated_ts", "Modificado"]
+    ];
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    function toggleSidebar() {
+      $("sidebar").classList.toggle("open");
+    }
+
+    function toggleSection(name) {
+      state.sectionsOpen[name] = !state.sectionsOpen[name];
+      renderSidebar();
+    }
+
+    function toggleMenu(id) {
+      ["groupMenu", "sortMenu"].forEach((m) => {
+        if (m !== id) $(m).classList.remove("show");
+      });
+      $(id).classList.toggle("show");
+      $("quickMenu").classList.remove("show");
+    }
+
+    function toggleQuickMenu() {
+      $("quickMenu").classList.toggle("show");
+      $("groupMenu").classList.remove("show");
+      $("sortMenu").classList.remove("show");
+    }
+
+    function closeMenus() {
+      $("groupMenu").classList.remove("show");
+      $("sortMenu").classList.remove("show");
+      $("quickMenu").classList.remove("show");
+    }
+
+    function buildMenus() {
+      $("groupMenu").innerHTML = groupOptions.map(([key, label]) => `
+        <button class="menu-item ${state.groupBy === key ? "active" : ""}" onclick="setGroupBy('${key}')">${label}</button>
+      `).join("");
+      $("sortMenu").innerHTML = sortOptions.map(([key, label]) => `
+        <button class="menu-item ${state.sortBy === key ? "active" : ""}" onclick="setSortBy('${key}')">${label}</button>
+      `).join("");
+      const sortLabel = sortOptions.find(([k]) => k === state.sortBy)?.[1] || "Área";
+      $("sortBtn").innerHTML = `Ordenar por ${sortLabel}<span>▾</span>`;
+      const groupLabel = groupOptions.find(([k]) => k === state.groupBy)?.[1] || "No agrupar";
+      $("groupBtn").innerHTML = `Agrupar por ${groupLabel}<span>▾</span>`;
+    }
+
+    function setGroupBy(key) {
+      state.groupBy = key;
+      buildMenus();
+      closeMenus();
+      renderTable();
+    }
+
+    function setSortBy(key) {
+      if (state.sortBy === key) {
+        state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        state.sortBy = key;
+        state.sortDir = "asc";
+      }
+      buildMenus();
+      closeMenus();
+      applyFilters();
+    }
+
+    function toNumber(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function getField(item, key) {
+      if (key === "device") return (item.friendly_name || item.entity_id || "").toLowerCase();
+      if (key === "battery") return toNumber(item.battery ?? -1);
+      if (key === "state_changes") return toNumber(item.state_changes);
+      if (key === "changes_per_hour") return toNumber(item.changes_per_hour);
+      if (key === "last_updated_ts") return toNumber(item.last_updated_ts);
+      return String(item[key] ?? "").toLowerCase();
+    }
+
+    function applyFilters() {
+      const q = state.search.toLowerCase();
+      let items = state.all.filter((it) => {
+        if (q) {
+          const haystack = [
+            it.entity_id,
+            it.friendly_name,
+            it.area,
+            it.integration,
+            it.manufacturer,
+            it.model,
+            it.state
+          ].join(" ").toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
+        if (state.filters.areas.size && !state.filters.areas.has(String(it.area || ""))) return false;
+        if (state.filters.integrations.size && !state.filters.integrations.has(String(it.integration || ""))) return false;
+        if (state.filters.states.size && !state.filters.states.has(String(it.state || ""))) return false;
+        if (state.filters.tags.size) {
+          const tags = Array.isArray(it.tags) ? it.tags : [];
+          if (!tags.some((t) => state.filters.tags.has(String(t)))) return false;
+        }
+        return true;
+      });
+      items.sort((a, b) => {
+        const va = getField(a, state.sortBy);
+        const vb = getField(b, state.sortBy);
+        if (va < vb) return state.sortDir === "asc" ? -1 : 1;
+        if (va > vb) return state.sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+      state.rows = items;
+      renderTable();
+    }
+
+    function groupValue(item) {
+      if (state.groupBy === "none") return "";
+      if (state.groupBy === "area") return item.area || "Sin área";
+      if (state.groupBy === "integration") return item.integration || "Sin integración";
+      if (state.groupBy === "manufacturer") return item.manufacturer || "Sin fabricante";
+      if (state.groupBy === "state") return item.state || "Sin estado";
+      return "";
+    }
+
+    function renderHead() {
+      const cols = columnsDefault.filter((c) => state.visibleColumns.includes(c.key));
+      $("tableHead").innerHTML = `
+        <th class="col-check"><input id="masterCheck" type="checkbox" onchange="toggleAllRows(this.checked)"></th>
+        ${cols.map((c) => `<th>${c.label}</th>`).join("")}
+      `;
+    }
+
+    function iconCell(item) {
+      if (item.icon) return `<span title="${esc(item.icon)}">◆</span>`;
+      return "✳";
+    }
+
+    function batteryCell(item) {
+      if (item.battery === null || item.battery === undefined || Number.isNaN(Number(item.battery))) return "—";
+      return `${Math.round(Number(item.battery))}% 🔋`;
+    }
+
+    function renderRow(item) {
+      const cols = state.visibleColumns;
+      const deviceLabel = item.friendly_name || item.entity_id || "sin nombre";
+      const cells = [];
+      if (cols.includes("icon")) cells.push(`<td class="col-icon">${iconCell(item)}</td>`);
+      if (cols.includes("device")) cells.push(`<td class="col-device"><span class="device-link" onclick="openDetail('${esc(item.entity_id)}')">${esc(deviceLabel)}</span></td>`);
+      if (cols.includes("area")) cells.push(`<td>${esc(item.area || "—")}</td>`);
+      if (cols.includes("integration")) cells.push(`<td>${esc(item.integration || "—")}</td>`);
+      if (cols.includes("manufacturer")) cells.push(`<td>${esc(item.manufacturer || "—")}</td>`);
+      if (cols.includes("model")) cells.push(`<td>${esc(item.model || "—")}</td>`);
+      if (cols.includes("battery")) cells.push(`<td class="battery">${batteryCell(item)}</td>`);
+      return `
+        <tr>
+          <td class="col-check"><input type="checkbox" ${state.selected.has(item.entity_id) ? "checked" : ""} onchange="toggleRow('${esc(item.entity_id)}', this.checked)"></td>
+          ${cells.join("")}
+        </tr>
+      `;
+    }
+
+    function renderTable() {
+      renderHead();
+      let html = "";
+      let prevGroup = "__none__";
+      for (const item of state.rows) {
+        const grp = groupValue(item);
+        if (state.groupBy !== "none" && grp !== prevGroup) {
+          const colCount = 1 + state.visibleColumns.length;
+          html += `<tr class="group-row"><td colspan="${colCount}">${esc(grp)}</td></tr>`;
+          prevGroup = grp;
+        }
+        html += renderRow(item);
+      }
+      if (!html) {
+        html = `<tr><td colspan="${1 + state.visibleColumns.length}">Sin resultados</td></tr>`;
+      }
+      $("tbody").innerHTML = html;
+      const allVisibleIds = state.rows.map((r) => r.entity_id);
+      const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => state.selected.has(id));
+      const master = $("masterCheck");
+      if (master) master.checked = allSelected;
+    }
+
+    function updateCatalog() {
+      const uniq = (arr) => [...new Set(arr.map((v) => String(v || "").trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+      state.catalog.areas = uniq(state.all.map((i) => i.area));
+      state.catalog.integrations = uniq(state.all.map((i) => i.integration));
+      state.catalog.states = uniq(state.all.map((i) => i.state));
+      state.catalog.tags = uniq(state.all.flatMap((i) => Array.isArray(i.tags) ? i.tags : []));
+    }
+
+    function renderSectionItems(name, list) {
+      const container = $(
+        name === "areas" ? "itemsAreas" :
+        name === "integrations" ? "itemsIntegrations" :
+        name === "states" ? "itemsStates" : "itemsTags"
+      );
+      const selectedSet = state.filters[name];
+      container.innerHTML = list.map((value) => `
+        <label class="section-item">
+          <input type="checkbox" ${selectedSet.has(value) ? "checked" : ""} onchange="toggleFilterValue('${name}', '${esc(value)}', this.checked)">
+          ${esc(value)}
+        </label>
+      `).join("") || `<div class="section-item" style="color:#7f8a97">Sin valores</div>`;
+      const countId = name === "areas" ? "countAreas" : name === "integrations" ? "countIntegrations" : name === "states" ? "countStates" : "countTags";
+      $(countId).textContent = selectedSet.size ? `${selectedSet.size} sel.` : "";
+    }
+
+    function renderSidebar() {
+      ["areas", "integrations", "states", "tags"].forEach((name) => {
+        const section = document.querySelector(`.section[data-section="${name}"]`);
+        if (!section) return;
+        section.classList.toggle("open", state.sectionsOpen[name]);
+      });
+      renderSectionItems("areas", state.catalog.areas);
+      renderSectionItems("integrations", state.catalog.integrations);
+      renderSectionItems("states", state.catalog.states);
+      renderSectionItems("tags", state.catalog.tags);
+    }
+
+    function toggleFilterValue(section, value, checked) {
+      if (checked) state.filters[section].add(value);
+      else state.filters[section].delete(value);
+      renderSidebar();
+      applyFilters();
+    }
+
+    function toggleRow(id, checked) {
+      if (checked) state.selected.add(id);
+      else state.selected.delete(id);
+      renderTable();
+    }
+
+    function toggleAllRows(checked) {
+      if (checked) state.rows.forEach((r) => state.selected.add(r.entity_id));
+      else state.rows.forEach((r) => state.selected.delete(r.entity_id));
+      renderTable();
+    }
+
+    async function openDetail(entityId) {
+      const data = await api("./api/entity/" + encodeURIComponent(entityId) + "/details");
+      state.currentDetail = data;
+      $("dEntityId").textContent = data.entity_id;
+      $("dName").textContent = data.friendly_name || "—";
+      $("dState").textContent = `${data.state ?? "—"} ${data.unit_of_measurement || ""}`;
+      const w = data.statistics?.windows || {};
+      $("d1h").textContent = `${w["1"]?.state_changes || 0} cambios (${(w["1"]?.changes_per_hour || 0).toFixed(2)}/h)`;
+      $("d24h").textContent = `${w["24"]?.state_changes || 0} cambios (${(w["24"]?.changes_per_hour || 0).toFixed(2)}/h)`;
+      $("d7d").textContent = `${w["168"]?.state_changes || 0} cambios (${(w["168"]?.changes_per_hour || 0).toFixed(2)}/h)`;
+      $("dLastChanged").textContent = data.last_changed || "—";
+      $("dLastUpdated").textContent = data.last_updated || "—";
+      const row = state.all.find((r) => r.entity_id === data.entity_id);
+      const excluded = Boolean(row?.excluded_by_app);
+      $("dToggleExclusion").textContent = excluded ? "Incluir en recorder" : "Excluir del recorder";
+      $("dToggleExclusion").onclick = async () => {
+        await toggleEntity(data.entity_id, !excluded);
+      };
+      $("dOpenHA").onclick = () => window.open(data.ha_entity_url, "_blank");
+      $("entityDrawer").classList.add("show");
+    }
+
+    function closeDrawer() {
+      $("entityDrawer").classList.remove("show");
+    }
+
+    async function toggleEntity(entityId, exclude) {
+      await api("./api/entities/" + encodeURIComponent(entityId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exclude })
+      });
+      await loadData();
+    }
+
+    async function setRecorder(enable) {
+      await api(enable ? "./api/recorder/enable" : "./api/recorder/disable", { method: "POST" });
+      closeMenus();
+    }
+
+    async function purgeGlobal() {
+      closeMenus();
+      if (!confirm("Lanzar recorder.purge global?")) return;
+      await api("./api/recorder/purge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keep_days: 10, repack: false, apply_filter: false })
+      });
+      alert("Purge global lanzado.");
+    }
+
+    async function purgeSelected() {
+      closeMenus();
+      const ids = [...state.selected];
+      if (!ids.length) {
+        alert("Selecciona una o más entidades.");
+        return;
+      }
+      if (!confirm(`Lanzar purge para ${ids.length} entidades?`)) return;
+      await api("./api/recorder/purge_entities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_ids: ids, domains: [], entity_globs: [], keep_days: 0 })
+      });
+      alert("Purge por entidades lanzado.");
+    }
+
+    async function applyChanges() {
+      closeMenus();
+      if (!confirm("Reiniciar Home Assistant Core para aplicar filtros?")) return;
+      await api("./api/apply", { method: "POST" });
+      alert("Reinicio solicitado.");
+    }
+
+    function openCustomize() {
+      renderColumnsList();
+      $("customizeModalBg").classList.add("show");
+    }
+
+    function closeCustomize() {
+      $("customizeModalBg").classList.remove("show");
+    }
+
+    function restoreColumns() {
+      state.visibleColumns = columnsDefault.map((c) => c.key);
+      renderColumnsList();
+      renderTable();
+    }
+
+    function renderColumnsList() {
+      $("columnsList").innerHTML = columnsDefault.map((col) => {
+        const visible = state.visibleColumns.includes(col.key);
+        return `
+          <div class="col-item">
+            <span style="opacity:.55">☰</span>
+            <span>${col.label}</span>
+            <span class="toggle" onclick="toggleColumn('${col.key}')">${visible ? "👁" : "🙈"}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function toggleColumn(key) {
+      if (state.visibleColumns.includes(key)) {
+        state.visibleColumns = state.visibleColumns.filter((k) => k !== key);
+      } else {
+        state.visibleColumns.push(key);
+      }
+      renderColumnsList();
+      renderTable();
+    }
+
+    async function loadData() {
+      try {
+        const data = await api("./api/entities?limit=5000&hours=24&sort_by=entity_id&sort_dir=asc");
+        state.all = data.items || [];
+        updateCatalog();
+        renderSidebar();
+        applyFilters();
+      } catch (err) {
+        $("tbody").innerHTML = `<tr><td colspan="12">Error cargando datos: ${esc(err.message)}</td></tr>`;
+      }
+    }
+
+    async function refreshStatusChips() {
+      try {
+        const status = await api("./api/status");
+        const mode = status.metrics_mode || "none";
+        const txt = mode === "sqlite" ? "SQLite" : mode === "mariadb" ? "MariaDB" : "Sin fuente";
+        document.title = `Recorder Control (${txt})`;
+      } catch (_) {}
+    }
+
+    $("search").addEventListener("input", () => {
+      state.search = $("search").value || "";
+      applyFilters();
+    });
+    document.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (!(t instanceof Element)) return;
+      if (!t.closest(".menu-btn") && !t.closest(".menu")) {
+        $("groupMenu").classList.remove("show");
+        $("sortMenu").classList.remove("show");
+      }
+      if (!t.closest(".chip-icon") && !t.closest(".quick")) {
+        $("quickMenu").classList.remove("show");
+      }
+      if (t.id === "customizeModalBg") closeCustomize();
+    });
+
+    buildMenus();
+    loadData();
+    refreshStatusChips();
+  </script>
+</body>
+</html>
         """
     )
 
