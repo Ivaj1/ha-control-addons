@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- Database detection aligned with `hass-dbstats` approach:
+  - recursive YAML loading
+  - `!include*` traversal
+  - `!secret` replacement with nearest/upper `secrets.yaml`
+  - recorder lookup via deep config search
+- Added DB connection override option:
+  - `connection_string` in add-on options (dbstats-like fallback)
+- Improved MySQL/MariaDB connection parsing:
+  - supports `unix_socket` query parameter in `db_url`
+
 ## 0.5.0
 
 - New professional dark UI with full control dashboard.

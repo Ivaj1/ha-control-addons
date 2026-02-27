@@ -1,12 +1,11 @@
 import json
 import os
-import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 import pymysql
@@ -27,7 +26,7 @@ RECORDER_EXCLUDE_DIR = HA_CONFIG_DIR / "recorder_exclude_entities"
 MANAGED_LIST_FILE = RECORDER_EXCLUDE_DIR / "recorder_visual_control.yaml"
 SETUP_PATTERN = "!include_dir_merge_list recorder_exclude_entities"
 
-app = FastAPI(title="Recorder Visual Control", version="0.3.0")
+app = FastAPI(title="Recorder Visual Control", version="0.6.0")
 
 
 class TogglePayload(BaseModel):
@@ -177,21 +176,162 @@ async def _call_recorder_service(service: str, payload: dict[str, Any] | None = 
 
 
 def _detect_sqlite_db_path() -> Path | None:
+    db_url = _extract_recorder_db_url_from_config()
+    if db_url and db_url.startswith("sqlite"):
+        sqlite_part = db_url.split("://", 1)[1] if "://" in db_url else ""
+        sqlite_path = "/" + sqlite_part.lstrip("/") if sqlite_part else ""
+        if sqlite_path:
+            parsed_path = Path(sqlite_path)
+            if parsed_path.exists():
+                return parsed_path
     default_db = HA_CONFIG_DIR / "home-assistant_v2.db"
-    if default_db.exists():
-        return default_db
+    return default_db if default_db.exists() else None
+
+
+def _read_connection_string_override() -> str | None:
+    for env_key in ("RECORDER_DB_URL", "DB_CONNECT_STRING", "CONNECTION_STRING"):
+        value = os.environ.get(env_key, "").strip()
+        if value:
+            return value
+    options_file = Path("/data/options.json")
+    if options_file.exists():
+        try:
+            options = json.loads(options_file.read_text(encoding="utf-8"))
+            if isinstance(options, dict):
+                for key in ("connectionString", "connection_string", "db_url"):
+                    value = str(options.get(key, "")).strip()
+                    if value:
+                        return value
+        except Exception:
+            return None
     return None
 
 
-def _get_recorder_db_url_from_config() -> str | None:
+def _find_key_recursive(obj: Any, key: str) -> Any:
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for value in obj.values():
+            found = _find_key_recursive(value, key)
+            if found is not None:
+                return found
+    if isinstance(obj, list):
+        for value in obj:
+            found = _find_key_recursive(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _replace_secrets_in_text(text: str, secrets: dict[str, str]) -> str:
+    result = text
+    for secret_name, secret_value in secrets.items():
+        result = result.replace(f"!secret {secret_name}", str(secret_value))
+    return result
+
+
+def _load_secrets(start_dir: Path, home_dir: Path, cache: dict[str, dict[str, str]]) -> dict[str, str]:
+    key = str(start_dir.resolve())
+    if key in cache:
+        return cache[key]
+    current = start_dir.resolve()
+    home_resolved = home_dir.resolve()
+    while True:
+        secret_file = current / "secrets.yaml"
+        if secret_file.exists():
+            try:
+                loaded = yaml.safe_load(secret_file.read_text(encoding="utf-8")) or {}
+                if isinstance(loaded, dict):
+                    secrets = {str(k): str(v) for k, v in loaded.items()}
+                    cache[key] = secrets
+                    return secrets
+            except Exception:
+                break
+        if current == home_resolved or len(str(current)) <= len(str(home_resolved)):
+            break
+        current = current.parent
+    cache[key] = {}
+    return {}
+
+
+def _fix_yaml_like_dbstats(text: str, secrets: dict[str, str]) -> tuple[str, list[str]]:
+    no_comments = "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
+    no_unknown_tags = no_comments.replace("!env_var", "env_var").replace("!input", "input")
+    include_tags = [
+        "include_dir_merge_list",
+        "include_dir_list",
+        "include_dir_named",
+        "include_dir_merge_named",
+        "include",
+    ]
+    found_files: list[str] = []
+    kept_lines: list[str] = []
+    for line in no_unknown_tags.splitlines():
+        processed = line
+        for tag in include_tags:
+            token = f"!{tag}"
+            if token in processed:
+                parts = processed.split(token, 1)
+                include_target = parts[1].strip()
+                if include_target:
+                    found_files.append(include_target)
+                processed = ""
+                break
+        if processed:
+            kept_lines.append(processed)
+    merged = "\n".join(kept_lines)
+    merged = _replace_secrets_in_text(merged, secrets)
+    # Keep parsing resilient when secret is missing.
+    merged = merged.replace("!secret", "secret")
+    return merged, found_files
+
+
+def _load_yaml_like_dbstats(abs_path: Path, home_dir: Path, secret_cache: dict[str, dict[str, str]]) -> Any:
+    if not abs_path.exists():
+        return {}
+    if abs_path.is_dir():
+        values: list[Any] = []
+        for file in sorted(abs_path.rglob("*.yaml")):
+            values.append(_load_yaml_like_dbstats(file, home_dir, secret_cache))
+        return values
+    raw = abs_path.read_text(encoding="utf-8", errors="replace")
+    secrets = _load_secrets(abs_path.parent, home_dir, secret_cache)
+    fixed_text, include_refs = _fix_yaml_like_dbstats(raw, secrets)
+    try:
+        loaded = yaml.safe_load(fixed_text) if fixed_text.strip() else {}
+    except Exception:
+        loaded = {}
+    additional: dict[str, Any] = {}
+    for include_ref in include_refs:
+        ref_path = (abs_path.parent / include_ref).resolve()
+        additional[Path(include_ref).stem] = _load_yaml_like_dbstats(
+            ref_path, home_dir, secret_cache
+        )
+    if isinstance(loaded, dict):
+        if additional:
+            loaded = {**loaded, "additional": additional}
+        return loaded
+    if additional:
+        return {"value": loaded, "additional": additional}
+    return loaded
+
+
+def _extract_recorder_db_url_from_config() -> str | None:
+    override = _read_connection_string_override()
+    if override:
+        return override
     if not CONFIG_YAML.exists():
         return None
-    text = CONFIG_YAML.read_text(encoding="utf-8", errors="replace")
-    # Keep this parser lightweight and robust against custom YAML tags.
-    match = re.search(r"^\s*db_url\s*:\s*['\"]?([^'\"\n#]+)", text, flags=re.MULTILINE)
-    if not match:
-        return None
-    return match.group(1).strip()
+    secret_cache: dict[str, dict[str, str]] = {}
+    parsed = _load_yaml_like_dbstats(CONFIG_YAML, HA_CONFIG_DIR, secret_cache)
+    recorder = _find_key_recursive(parsed, "recorder")
+    if isinstance(recorder, dict):
+        db_url = recorder.get("db_url")
+        if isinstance(db_url, str) and db_url.strip():
+            return db_url.strip()
+    return None
 
 
 def _query_activity_metrics_sqlite(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
@@ -304,11 +444,11 @@ def _query_activity_metrics_sqlite(hours: int = 24, limit: int = 1200) -> dict[s
 
 
 def _query_activity_metrics_mariadb(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
-    db_url = _get_recorder_db_url_from_config()
+    db_url = _extract_recorder_db_url_from_config()
     if not db_url:
         return {
             "available": False,
-            "reason": "No se detecto db_url en configuration.yaml.",
+            "reason": "No se detecto db_url.",
             "window_hours": hours,
             "items": [],
             "by_entity_id": {},
@@ -331,6 +471,8 @@ def _query_activity_metrics_mariadb(hours: int = 24, limit: int = 1200) -> dict[
     user = unquote(parsed.username or "")
     password = unquote(parsed.password or "")
     database = (parsed.path or "/").lstrip("/") or "homeassistant"
+    query_params = parse_qs(parsed.query)
+    unix_socket = query_params.get("unix_socket", [None])[0]
     items: list[dict[str, Any]] = []
     query_used = ""
 
@@ -341,6 +483,7 @@ def _query_activity_metrics_mariadb(hours: int = 24, limit: int = 1200) -> dict[
             user=user,
             password=password,
             database=database,
+            unix_socket=unix_socket,
             connect_timeout=5,
             read_timeout=25,
             write_timeout=25,
@@ -412,6 +555,7 @@ def _query_activity_metrics_mariadb(hours: int = 24, limit: int = 1200) -> dict[
         "window_hours": hours,
         "db_host": host,
         "db_name": database,
+        "db_socket": unix_socket,
         "query_used": query_used,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "items": items,
@@ -438,7 +582,7 @@ async def _query_activity_metrics(hours: int = 24, limit: int = 1200) -> dict[st
 
 
 def _metric_sort_key(item: dict[str, Any], field: str) -> Any:
-    if field in {"state_changes", "changes_per_hour", "last_updated_ts"}:
+    if field in {"state_changes", "changes_per_hour", "last_updated_ts", "battery"}:
         return float(item.get(field, 0))
     return str(item.get(field, "")).lower()
 
@@ -472,7 +616,7 @@ def api_setup() -> dict[str, Any]:
 async def api_status() -> dict[str, Any]:
     recorder = await _recorder_info()
     db_path = _detect_sqlite_db_path()
-    db_url = _get_recorder_db_url_from_config()
+    db_url = _extract_recorder_db_url_from_config()
     mariadb_mode = bool(db_url and urlparse(db_url).scheme in {"mysql", "mysql+pymysql", "mariadb", "mariadb+pymysql"})
     metrics_mode = "sqlite" if db_path else ("mariadb" if mariadb_mode else "none")
     return {
@@ -519,9 +663,30 @@ async def api_entities(
         if not entity_id:
             continue
         normalized_entity_id = entity_id.strip().lower()
-        friendly_name = str(item.get("attributes", {}).get("friendly_name", ""))
+        attributes = item.get("attributes", {})
+        if not isinstance(attributes, dict):
+            attributes = {}
+        friendly_name = str(attributes.get("friendly_name", ""))
         domain_name = entity_id.split(".", 1)[0] if "." in entity_id else "unknown"
         m = metrics_map.get(normalized_entity_id, {})
+        area_name = (
+            str(attributes.get("area_name") or attributes.get("area") or attributes.get("suggested_area") or "").strip()
+        )
+        integration_name = str(attributes.get("integration") or domain_name).strip()
+        manufacturer = str(attributes.get("manufacturer") or attributes.get("device_manufacturer") or "").strip()
+        model = str(attributes.get("model") or attributes.get("device_model") or "").strip()
+        battery_raw = attributes.get("battery_level", attributes.get("battery"))
+        try:
+            battery = float(battery_raw) if battery_raw is not None else None
+        except (TypeError, ValueError):
+            battery = None
+        state_value = str(item.get("state", ""))
+        tags_attr = attributes.get("labels") or attributes.get("tags") or []
+        if isinstance(tags_attr, list):
+            tags = [str(tag).strip() for tag in tags_attr if str(tag).strip()]
+        else:
+            tags = []
+        icon = str(attributes.get("icon", "")).strip()
 
         if needle and needle not in normalized_entity_id and needle not in friendly_name.lower():
             continue
@@ -542,9 +707,32 @@ async def api_entities(
                 "state_changes": int(m.get("state_changes", 0)),
                 "changes_per_hour": float(m.get("changes_per_hour", 0)),
                 "last_updated_ts": float(m.get("last_updated_ts", 0)),
+                "area": area_name,
+                "integration": integration_name,
+                "manufacturer": manufacturer,
+                "model": model,
+                "battery": battery,
+                "state": state_value,
+                "last_changed": str(item.get("last_changed", "")),
+                "last_updated": str(item.get("last_updated", "")),
+                "icon": icon,
+                "tags": tags,
             }
         )
-    sort_key = sort_by if sort_by in {"entity_id", "friendly_name", "domain", "state_changes", "changes_per_hour", "last_updated_ts"} else "state_changes"
+    sort_key = sort_by if sort_by in {
+        "entity_id",
+        "friendly_name",
+        "domain",
+        "state_changes",
+        "changes_per_hour",
+        "last_updated_ts",
+        "area",
+        "integration",
+        "manufacturer",
+        "model",
+        "battery",
+        "state",
+    } else "state_changes"
     reverse = sort_dir.strip().lower() != "asc"
     entities.sort(key=lambda x: _metric_sort_key(x, sort_key), reverse=reverse)
     if limit > 0:

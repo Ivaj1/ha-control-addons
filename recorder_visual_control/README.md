@@ -11,3 +11,5 @@ Home Assistant add-on that provides a visual panel to include/exclude entities f
 - Recorder controls: enable/disable from UI.
 - Purge controls: global purge and purge by selected entities/domains/globs.
 - Apply changes with Home Assistant Core restart.
+- DB detection compatible with dbstats (`!include*`, `!secret`, recursive config parsing).
+- Optional `connection_string` override in add-on options.

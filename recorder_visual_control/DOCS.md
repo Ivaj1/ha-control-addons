@@ -42,6 +42,16 @@ Los cambios de filtros de `recorder` se aplican al reiniciar Home Assistant Core
 Si usas SQLite local (`home-assistant_v2.db`), la app usa consulta directa a SQLite.
 Si usas MariaDB/MySQL en `recorder.db_url`, la app consulta esa base directamente.
 
+### Detección de DB (estilo dbstats)
+
+La detección de `recorder.db_url` sigue el enfoque de `hass-dbstats`:
+- parseo recursivo de YAML
+- resolución de `!include*`
+- reemplazo de `!secret` con `secrets.yaml`
+
+Además puedes forzar conexión en opciones del add-on:
+- `connection_string`
+
 ## Instalación
 
 1. En Home Assistant, abre `Settings` -> `Add-ons` -> `Add-on Store`.

@@ -1,7 +1,7 @@
 name: Recorder Visual Control
 slug: recorder_visual_control
 description: Visual control panel to exclude/include entities from recorder history.
-version: 0.5.0
+version: 0.6.0
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/recorder_visual_control
 startup: services
 boot: manual
@@ -21,5 +21,7 @@ map:
   - homeassistant_config:rw
 options:
   log_level: info
+  connection_string: ""
 schema:
   log_level: list(debug|info|warning|error)
+  connection_string: str?
