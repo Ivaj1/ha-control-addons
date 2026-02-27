@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.3
+
+- UI improvements requested:
+  - clickable table headers with asc/desc toggle sorting.
+  - draggable column resize from header separators.
+  - metrics columns visible by default (`Cambios 24h`, `Cambios/h`, `Filas DB`, `Atributos MB`).
+- Recorder workflow improvements:
+  - new `Recorder` status column (Incluida/Excluida).
+  - bulk include/exclude actions for selected entities from the quick actions menu.
+  - new backend endpoint: `POST /api/entities_bulk`.
+
 ## 0.7.2
 
 - Performance update focused on `dbstats`-style behavior:

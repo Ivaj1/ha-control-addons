@@ -27,7 +27,7 @@ RECORDER_EXCLUDE_DIR = HA_CONFIG_DIR / "recorder_exclude_entities"
 MANAGED_LIST_FILE = RECORDER_EXCLUDE_DIR / "recorder_visual_control.yaml"
 SETUP_PATTERN = "!include_dir_merge_list recorder_exclude_entities"
 
-app = FastAPI(title="Recorder Visual Control", version="0.7.2")
+app = FastAPI(title="Recorder Visual Control", version="0.7.3")
 _REGISTRY_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _STATES_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _ACTIVITY_CACHE: dict[str, Any] = {}
@@ -35,6 +35,11 @@ _DBSTATS_CACHE: dict[str, Any] = {}
 
 
 class TogglePayload(BaseModel):
+    exclude: bool = Field(..., description="True to exclude from recorder")
+
+
+class BulkTogglePayload(BaseModel):
+    entity_ids: list[str] = Field(default_factory=list)
     exclude: bool = Field(..., description="True to exclude from recorder")
 
 
@@ -1140,6 +1145,7 @@ async def api_entities(
                 "friendly_name": friendly_name,
                 "domain": domain_name,
                 "excluded_by_app": is_excluded,
+                "recorder_status": "excluded" if is_excluded else "included",
                 "state_changes": int(m.get("state_changes", 0)),
                 "changes_per_hour": float(m.get("changes_per_hour", 0)),
                 "last_updated_ts": float(m.get("last_updated_ts", 0)),
@@ -1164,6 +1170,7 @@ async def api_entities(
         "state_changes",
         "changes_per_hour",
         "last_updated_ts",
+        "recorder_status",
         "area",
         "integration",
         "manufacturer",
@@ -1296,6 +1303,40 @@ def api_toggle_entity(entity_id: str, payload: TogglePayload) -> dict[str, Any]:
         "ok": True,
         "entity_id": normalized,
         "excluded_by_app": payload.exclude,
+        "excluded_count": len(excluded),
+    }
+
+
+@app.post("/api/entities_bulk")
+def api_toggle_entities_bulk(payload: BulkTogglePayload) -> dict[str, Any]:
+    normalized_ids = sorted(
+        {
+            item.strip().lower()
+            for item in payload.entity_ids
+            if isinstance(item, str) and "." in item.strip()
+        }
+    )
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="No se recibieron entity_ids validos")
+
+    excluded = _load_excluded_entities()
+    changed = 0
+    for entity_id in normalized_ids:
+        if payload.exclude:
+            if entity_id not in excluded:
+                excluded.add(entity_id)
+                changed += 1
+        else:
+            if entity_id in excluded:
+                excluded.discard(entity_id)
+                changed += 1
+    _save_excluded_entities(excluded)
+
+    return {
+        "ok": True,
+        "exclude": payload.exclude,
+        "requested": len(normalized_ids),
+        "changed": changed,
         "excluded_count": len(excluded),
     }
 
@@ -1689,9 +1730,10 @@ async def index() -> HTMLResponse:
       overflow: auto;
     }
     table {
-      width: 100%;
       border-collapse: collapse;
-      min-width: 900px;
+      width: max-content;
+      min-width: 100%;
+      table-layout: fixed;
     }
     thead th {
       position: sticky;
@@ -1708,6 +1750,16 @@ async def index() -> HTMLResponse:
       padding: 0 12px;
       white-space: nowrap;
       user-select: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    thead th.sortable { cursor: pointer; }
+    thead th.sortable:hover { color: var(--text); }
+    .sort-ind {
+      margin-left: 6px;
+      font-size: 10px;
+      color: var(--accent);
+      opacity: .95;
     }
     thead th:first-child { padding-left: 16px; }
     tbody td {
@@ -1716,6 +1768,8 @@ async def index() -> HTMLResponse:
       padding: 0 12px;
       color: var(--muted-2);
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     tbody td:first-child { padding-left: 16px; }
     tbody tr { transition: background .1s; }
@@ -1724,6 +1778,36 @@ async def index() -> HTMLResponse:
     .col-check { width: 36px; }
     .col-icon { width: 36px; text-align: center; }
     .col-device { min-width: 240px; }
+    .th-inner {
+      position: relative;
+      display: flex;
+      align-items: center;
+      height: 100%;
+      padding-right: 10px;
+    }
+    .col-resizer {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 10px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 4;
+    }
+    .col-resizer::after {
+      content: "";
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      right: 4px;
+      width: 1px;
+      background: var(--line);
+      opacity: .65;
+    }
+    body.resizing-cols {
+      cursor: col-resize;
+      user-select: none;
+    }
     .device-name {
       color: var(--text);
       cursor: pointer;
@@ -1748,6 +1832,7 @@ async def index() -> HTMLResponse:
       font-family: "IBM Plex Mono", monospace;
     }
     .badge-excluded { background: var(--danger-dim); color: var(--danger); }
+    .badge-included { background: var(--accent-dim); color: var(--accent); }
     .battery-bar {
       display: inline-flex;
       align-items: center;
@@ -2157,6 +2242,10 @@ async def index() -> HTMLResponse:
           <button onclick="setRecorder(true)">&#9654; Activar recorder</button>
           <button onclick="setRecorder(false)">&#9632; Desactivar recorder</button>
           <div class="quick-sep"></div>
+          <div class="quick-section-label">Selección</div>
+          <button onclick="bulkToggleSelected(true)" class="danger">&#10005; Excluir seleccionadas</button>
+          <button onclick="bulkToggleSelected(false)">&#10003; Incluir seleccionadas</button>
+          <div class="quick-sep"></div>
           <div class="quick-section-label">Purge</div>
           <button onclick="purgeGlobal()" class="danger">&#128465; Purge global</button>
           <button onclick="purgeSelected()" class="danger">&#128465; Purge seleccionadas</button>
@@ -2263,14 +2352,35 @@ async def index() -> HTMLResponse:
     const splitCsv = (t) => String(t || "").split(",").map((s) => s.trim()).filter(Boolean);
 
     const columnsDefault = [
-      { key: "icon", label: "Icono" },
-      { key: "device", label: "Dispositivo" },
-      { key: "area", label: "Área" },
-      { key: "integration", label: "Integración" },
-      { key: "manufacturer", label: "Fabricante" },
-      { key: "model", label: "Modelo" },
-      { key: "battery", label: "Batería" }
+      { key: "icon", label: "Icono", width: 58, minWidth: 52 },
+      { key: "device", label: "Dispositivo", width: 330, minWidth: 220 },
+      { key: "recorder_status", label: "Recorder", width: 120, minWidth: 100 },
+      { key: "area", label: "Área", width: 180, minWidth: 120 },
+      { key: "integration", label: "Integración", width: 170, minWidth: 120 },
+      { key: "manufacturer", label: "Fabricante", width: 170, minWidth: 120 },
+      { key: "model", label: "Modelo", width: 170, minWidth: 120 },
+      { key: "battery", label: "Batería", width: 120, minWidth: 90 },
+      { key: "state_changes", label: "Cambios 24h", width: 130, minWidth: 110 },
+      { key: "changes_per_hour", label: "Cambios/h", width: 120, minWidth: 100 },
+      { key: "db_rows_total", label: "Filas DB", width: 130, minWidth: 100 },
+      { key: "db_attrs_mb", label: "Atributos MB", width: 130, minWidth: 110 },
+      { key: "last_updated_ts", label: "Últ. escritura", width: 180, minWidth: 140 }
     ];
+    const defaultVisibleColumns = [
+      "icon",
+      "device",
+      "recorder_status",
+      "area",
+      "integration",
+      "manufacturer",
+      "model",
+      "battery",
+      "state_changes",
+      "changes_per_hour",
+      "db_rows_total",
+      "db_attrs_mb"
+    ];
+    const columnByKey = Object.fromEntries(columnsDefault.map((col) => [col.key, col]));
     const state = {
       all: [],
       rows: [],
@@ -2279,12 +2389,14 @@ async def index() -> HTMLResponse:
       catalog: { areas: [], integrations: [], states: [], tags: [] },
       sectionsOpen: { areas: false, integrations: false, states: false, tags: false },
       groupBy: "none",
-      sortBy: "area",
-      sortDir: "asc",
+      sortBy: "state_changes",
+      sortDir: "desc",
       search: "",
       hours: 24,
-      visibleColumns: columnsDefault.map((c) => c.key),
-      currentDetail: null
+      visibleColumns: [...defaultVisibleColumns],
+      columnWidths: Object.fromEntries(columnsDefault.map((col) => [col.key, col.width])),
+      currentDetail: null,
+      resizing: { key: null, startX: 0, startWidth: 0 }
     };
 
     const groupOptions = [
@@ -2300,12 +2412,16 @@ async def index() -> HTMLResponse:
       ["integration", "Integración"],
       ["manufacturer", "Fabricante"],
       ["model", "Modelo"],
+      ["recorder_status", "Recorder"],
       ["battery", "Batería"],
       ["state", "Estado"],
       ["state_changes", "Cambios"],
       ["changes_per_hour", "Cambios/h"],
+      ["db_rows_total", "Filas DB"],
+      ["db_attrs_mb", "Atributos MB"],
       ["last_updated_ts", "Modificado"]
     ];
+    const sortableColumnKeys = new Set(sortOptions.map(([key]) => key));
 
     async function api(path, opts = {}) {
       const res = await fetch(path, opts);
@@ -2349,7 +2465,7 @@ async def index() -> HTMLResponse:
       $("sortMenu").innerHTML = sortOptions.map(([key, label]) => `
         <button class="menu-item ${state.sortBy === key ? "active" : ""}" onclick="setSortBy('${key}')">${label}</button>
       `).join("");
-      const sortLabel = sortOptions.find(([k]) => k === state.sortBy)?.[1] || "Área";
+      const sortLabel = sortOptions.find(([k]) => k === state.sortBy)?.[1] || "Cambios";
       $("sortBtn").innerHTML = `Ordenar: ${sortLabel} <span>&#9662;</span>`;
       const groupLabel = groupOptions.find(([k]) => k === state.groupBy)?.[1] || "No agrupar";
       $("groupBtn").innerHTML = `Agrupar: ${groupLabel} <span>&#9662;</span>`;
@@ -2374,9 +2490,48 @@ async def index() -> HTMLResponse:
       applyFilters();
     }
 
+    function onHeaderSort(key) {
+      if (!sortableColumnKeys.has(key)) return;
+      setSortBy(key);
+    }
+
+    function sortIndicator(key) {
+      if (state.sortBy !== key) return "";
+      return `<span class="sort-ind">${state.sortDir === "asc" ? "▲" : "▼"}</span>`;
+    }
+
     function toNumber(v) {
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
+    }
+
+    function formatInt(v) {
+      return Math.round(toNumber(v)).toLocaleString("es-ES");
+    }
+
+    function formatFloat(v, digits = 2) {
+      return toNumber(v).toLocaleString("es-ES", {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+      });
+    }
+
+    function colWidth(key) {
+      return Number(state.columnWidths[key] || columnByKey[key]?.width || 120);
+    }
+
+    function colWidthStyle(key) {
+      const width = colWidth(key);
+      return `width:${width}px;min-width:${width}px;max-width:${width}px`;
+    }
+
+    function applyColumnWidthToDom(key, width) {
+      const px = `${Math.round(width)}px`;
+      document.querySelectorAll(`[data-col="${key}"]`).forEach((el) => {
+        el.style.width = px;
+        el.style.minWidth = px;
+        el.style.maxWidth = px;
+      });
     }
 
     function getField(item, key) {
@@ -2384,7 +2539,10 @@ async def index() -> HTMLResponse:
       if (key === "battery") return toNumber(item.battery ?? -1);
       if (key === "state_changes") return toNumber(item.state_changes);
       if (key === "changes_per_hour") return toNumber(item.changes_per_hour);
+      if (key === "db_rows_total") return toNumber(item.db_rows_total);
+      if (key === "db_attrs_mb") return toNumber(item.db_attrs_mb);
       if (key === "last_updated_ts") return toNumber(item.last_updated_ts);
+      if (key === "recorder_status") return item.excluded_by_app ? 1 : 0;
       return String(item[key] ?? "").toLowerCase();
     }
 
@@ -2399,7 +2557,8 @@ async def index() -> HTMLResponse:
             it.integration,
             it.manufacturer,
             it.model,
-            it.state
+            it.state,
+            it.excluded_by_app ? "excluida" : "incluida"
           ].join(" ").toLowerCase();
           if (!haystack.includes(q)) return false;
         }
@@ -2436,8 +2595,62 @@ async def index() -> HTMLResponse:
       const cols = columnsDefault.filter((c) => state.visibleColumns.includes(c.key));
       $("tableHead").innerHTML = `
         <th class="col-check"><input id="masterCheck" type="checkbox" onchange="toggleAllRows(this.checked)"></th>
-        ${cols.map((c) => `<th>${c.label}</th>`).join("")}
+        ${cols.map((c) => `
+          <th
+            data-col="${c.key}"
+            class="${sortableColumnKeys.has(c.key) ? "sortable" : ""}"
+            style="${colWidthStyle(c.key)}"
+            onclick="onHeaderSort('${c.key}')"
+          >
+            <div class="th-inner">
+              <span>${c.label}${sortIndicator(c.key)}</span>
+              <span class="col-resizer" onmousedown="startResize(event, '${c.key}')" ontouchstart="startResize(event, '${c.key}')"></span>
+            </div>
+          </th>
+        `).join("")}
       `;
+    }
+
+    function getClientX(ev) {
+      if (ev.touches && ev.touches.length) return ev.touches[0].clientX;
+      if (ev.changedTouches && ev.changedTouches.length) return ev.changedTouches[0].clientX;
+      return ev.clientX || 0;
+    }
+
+    function startResize(ev, key) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      state.resizing = {
+        key,
+        startX: getClientX(ev),
+        startWidth: colWidth(key)
+      };
+      document.body.classList.add("resizing-cols");
+      document.addEventListener("mousemove", onResizeMove);
+      document.addEventListener("mouseup", stopResize);
+      document.addEventListener("touchmove", onResizeMove, { passive: false });
+      document.addEventListener("touchend", stopResize);
+    }
+
+    function onResizeMove(ev) {
+      if (!state.resizing.key) return;
+      ev.preventDefault();
+      const key = state.resizing.key;
+      const minWidth = Number(columnByKey[key]?.minWidth || 80);
+      const delta = getClientX(ev) - state.resizing.startX;
+      const next = Math.max(minWidth, Math.round(state.resizing.startWidth + delta));
+      state.columnWidths[key] = next;
+      applyColumnWidthToDom(key, next);
+    }
+
+    function stopResize() {
+      if (!state.resizing.key) return;
+      state.resizing = { key: null, startX: 0, startWidth: 0 };
+      document.body.classList.remove("resizing-cols");
+      document.removeEventListener("mousemove", onResizeMove);
+      document.removeEventListener("mouseup", stopResize);
+      document.removeEventListener("touchmove", onResizeMove);
+      document.removeEventListener("touchend", stopResize);
     }
 
     function iconCell(item) {
@@ -2454,17 +2667,26 @@ async def index() -> HTMLResponse:
     function renderRow(item) {
       const cols = state.visibleColumns;
       const deviceLabel = item.friendly_name || item.entity_id || "sin nombre";
+      const recorderBadge = item.excluded_by_app
+        ? '<span class="badge badge-excluded">Excluida</span>'
+        : '<span class="badge badge-included">Incluida</span>';
       const cells = [];
-      if (cols.includes("icon")) cells.push(`<td class="col-icon">${iconCell(item)}</td>`);
-      if (cols.includes("device")) cells.push(`<td class="col-device">
-        <div class="device-name" onclick="openDetail('${esc(item.entity_id)}')">${esc(deviceLabel)}${item.excluded_by_app ? ' <span class="badge badge-excluded">excluido</span>' : ''}</div>
+      if (cols.includes("icon")) cells.push(`<td data-col="icon" class="col-icon" style="${colWidthStyle("icon")}">${iconCell(item)}</td>`);
+      if (cols.includes("device")) cells.push(`<td data-col="device" class="col-device" style="${colWidthStyle("device")}">
+        <div class="device-name" onclick="openDetail('${esc(item.entity_id)}')">${esc(deviceLabel)}</div>
         <div class="device-id">${esc(item.entity_id)}</div>
       </td>`);
-      if (cols.includes("area")) cells.push(`<td>${esc(item.area || "—")}</td>`);
-      if (cols.includes("integration")) cells.push(`<td>${esc(item.integration || "—")}</td>`);
-      if (cols.includes("manufacturer")) cells.push(`<td>${esc(item.manufacturer || "—")}</td>`);
-      if (cols.includes("model")) cells.push(`<td>${esc(item.model || "—")}</td>`);
-      if (cols.includes("battery")) cells.push(`<td>${batteryCell(item)}</td>`);
+      if (cols.includes("recorder_status")) cells.push(`<td data-col="recorder_status" style="${colWidthStyle("recorder_status")}">${recorderBadge}</td>`);
+      if (cols.includes("area")) cells.push(`<td data-col="area" style="${colWidthStyle("area")}">${esc(item.area || "—")}</td>`);
+      if (cols.includes("integration")) cells.push(`<td data-col="integration" style="${colWidthStyle("integration")}">${esc(item.integration || "—")}</td>`);
+      if (cols.includes("manufacturer")) cells.push(`<td data-col="manufacturer" style="${colWidthStyle("manufacturer")}">${esc(item.manufacturer || "—")}</td>`);
+      if (cols.includes("model")) cells.push(`<td data-col="model" style="${colWidthStyle("model")}">${esc(item.model || "—")}</td>`);
+      if (cols.includes("battery")) cells.push(`<td data-col="battery" style="${colWidthStyle("battery")}">${batteryCell(item)}</td>`);
+      if (cols.includes("state_changes")) cells.push(`<td data-col="state_changes" style="${colWidthStyle("state_changes")}">${formatInt(item.state_changes || 0)}</td>`);
+      if (cols.includes("changes_per_hour")) cells.push(`<td data-col="changes_per_hour" style="${colWidthStyle("changes_per_hour")}">${formatFloat(item.changes_per_hour || 0, 2)}</td>`);
+      if (cols.includes("db_rows_total")) cells.push(`<td data-col="db_rows_total" style="${colWidthStyle("db_rows_total")}">${formatInt(item.db_rows_total || 0)}</td>`);
+      if (cols.includes("db_attrs_mb")) cells.push(`<td data-col="db_attrs_mb" style="${colWidthStyle("db_attrs_mb")}">${formatFloat(item.db_attrs_mb || 0, 3)}</td>`);
+      if (cols.includes("last_updated_ts")) cells.push(`<td data-col="last_updated_ts" style="${colWidthStyle("last_updated_ts")}">${ts(item.last_updated_ts)}</td>`);
       return `
         <tr>
           <td class="col-check"><input type="checkbox" ${state.selected.has(item.entity_id) ? "checked" : ""} onchange="toggleRow('${esc(item.entity_id)}', this.checked)"></td>
@@ -2600,6 +2822,24 @@ async def index() -> HTMLResponse:
       await loadData();
     }
 
+    async function bulkToggleSelected(exclude) {
+      closeMenus();
+      const ids = [...state.selected];
+      if (!ids.length) {
+        alert("Selecciona una o más entidades.");
+        return;
+      }
+      const action = exclude ? "excluir" : "incluir";
+      if (!confirm(`${action[0].toUpperCase() + action.slice(1)} ${ids.length} entidades en recorder?`)) return;
+      await api("./api/entities_bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_ids: ids, exclude })
+      });
+      state.selected.clear();
+      await loadData();
+    }
+
     async function setRecorder(enable) {
       await api(enable ? "./api/recorder/enable" : "./api/recorder/disable", { method: "POST" });
       closeMenus();
@@ -2649,7 +2889,8 @@ async def index() -> HTMLResponse:
     }
 
     function restoreColumns() {
-      state.visibleColumns = columnsDefault.map((c) => c.key);
+      state.visibleColumns = [...defaultVisibleColumns];
+      state.columnWidths = Object.fromEntries(columnsDefault.map((col) => [col.key, col.width]));
       renderColumnsList();
       renderTable();
     }
