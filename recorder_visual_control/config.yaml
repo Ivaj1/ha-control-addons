@@ -1,7 +1,7 @@
 name: Recorder Visual Control
 slug: recorder_visual_control
 description: Visual control panel to exclude/include entities from recorder history.
-version: 0.7.1
+version: 0.7.2
 url: https://github.com/Ivaj1/ha-control-addons/tree/main/recorder_visual_control
 startup: services
 boot: manual

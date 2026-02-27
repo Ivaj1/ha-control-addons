@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2
+
+- Performance update focused on `dbstats`-style behavior:
+  - moved blocking SQL work to background threads to avoid FastAPI event loop stalls.
+  - `/api/entities` now loads states, registry and metrics in parallel.
+  - optimized DB size queries to compute attributes only for top entities instead of scanning full DB each load.
+  - increased dbstats cache TTL to reduce repeated heavy queries.
+- Improved entity detail stats loading by querying the 1h/24h/7d windows concurrently.
+
 ## 0.7.1
 
 - Published UI refinements and layout adjustments for the new Home Assistant-like panel.

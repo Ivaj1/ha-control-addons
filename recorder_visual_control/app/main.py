@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sqlite3
@@ -26,7 +27,11 @@ RECORDER_EXCLUDE_DIR = HA_CONFIG_DIR / "recorder_exclude_entities"
 MANAGED_LIST_FILE = RECORDER_EXCLUDE_DIR / "recorder_visual_control.yaml"
 SETUP_PATTERN = "!include_dir_merge_list recorder_exclude_entities"
 
-app = FastAPI(title="Recorder Visual Control", version="0.6.0")
+app = FastAPI(title="Recorder Visual Control", version="0.7.2")
+_REGISTRY_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_STATES_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_ACTIVITY_CACHE: dict[str, Any] = {}
+_DBSTATS_CACHE: dict[str, Any] = {}
 
 
 class TogglePayload(BaseModel):
@@ -128,7 +133,109 @@ async def _recorder_info() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"Status read failed: {err}") from err
 
 
+async def _ws_run_commands(commands: list[dict[str, Any]]) -> list[Any]:
+    """Run multiple WS commands in one authenticated session."""
+    try:
+        async with websockets.connect(CORE_WS_URL) as ws:
+            hello = json.loads(await ws.recv())
+            if hello.get("type") != "auth_required":
+                raise RuntimeError("Unexpected WebSocket handshake")
+            await ws.send(json.dumps({"type": "auth", "access_token": SUPERVISOR_TOKEN}))
+            auth_response = json.loads(await ws.recv())
+            if auth_response.get("type") != "auth_ok":
+                raise RuntimeError("WebSocket auth failed")
+
+            pending: dict[int, int] = {}
+            results: list[Any] = [None] * len(commands)
+            msg_id = 1
+            for index, cmd in enumerate(commands):
+                payload = {"id": msg_id, **cmd}
+                pending[msg_id] = index
+                await ws.send(json.dumps(payload))
+                msg_id += 1
+
+            while pending:
+                incoming = json.loads(await ws.recv())
+                incoming_id = incoming.get("id")
+                if incoming_id not in pending:
+                    continue
+                idx = pending.pop(incoming_id)
+                if incoming.get("success", False):
+                    results[idx] = incoming.get("result")
+                else:
+                    results[idx] = None
+            return results
+    except Exception:
+        return [None] * len(commands)
+
+
+async def _get_registry_metadata() -> dict[str, Any]:
+    """Fetch area/device/entity registry and map entity -> area/manufacturer/model/platform."""
+    now = time.time()
+    cache_data = _REGISTRY_CACHE.get("data")
+    if cache_data and (now - float(_REGISTRY_CACHE.get("ts", 0.0)) < 30):
+        return cache_data
+
+    area_list, device_list, entity_list = await _ws_run_commands(
+        [
+            {"type": "config/area_registry/list"},
+            {"type": "config/device_registry/list"},
+            {"type": "config/entity_registry/list"},
+        ]
+    )
+    area_map: dict[str, str] = {}
+    device_map: dict[str, dict[str, Any]] = {}
+    entity_map: dict[str, dict[str, Any]] = {}
+
+    if isinstance(area_list, list):
+        for area in area_list:
+            if not isinstance(area, dict):
+                continue
+            area_id = str(area.get("area_id", "")).strip()
+            name = str(area.get("name", "")).strip()
+            if area_id and name:
+                area_map[area_id] = name
+
+    if isinstance(device_list, list):
+        for device in device_list:
+            if not isinstance(device, dict):
+                continue
+            device_id = str(device.get("id", "")).strip()
+            if not device_id:
+                continue
+            device_map[device_id] = {
+                "area_id": str(device.get("area_id", "")).strip(),
+                "manufacturer": str(device.get("manufacturer", "")).strip(),
+                "model": str(device.get("model", "")).strip(),
+                "name": str(device.get("name_by_user") or device.get("name") or "").strip(),
+            }
+
+    if isinstance(entity_list, list):
+        for entity in entity_list:
+            if not isinstance(entity, dict):
+                continue
+            entity_id = str(entity.get("entity_id", "")).strip().lower()
+            if not entity_id:
+                continue
+            labels = entity.get("labels") if isinstance(entity.get("labels"), list) else []
+            entity_map[entity_id] = {
+                "area_id": str(entity.get("area_id", "")).strip(),
+                "device_id": str(entity.get("device_id", "")).strip(),
+                "platform": str(entity.get("platform", "")).strip(),
+                "name": str(entity.get("name") or "").strip(),
+                "labels": [str(item).strip() for item in labels if str(item).strip()],
+            }
+
+    payload = {"areas": area_map, "devices": device_map, "entities": entity_map}
+    _REGISTRY_CACHE["ts"] = now
+    _REGISTRY_CACHE["data"] = payload
+    return payload
+
+
 async def _list_states() -> list[dict[str, Any]]:
+    cache_data = _STATES_CACHE.get("data")
+    if cache_data and (time.time() - float(_STATES_CACHE.get("ts", 0.0)) < 20):
+        return cache_data
     url = f"{CORE_HTTP_BASE}/api/states"
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         response = await client.get(url, headers=_auth_headers())
@@ -137,6 +244,8 @@ async def _list_states() -> list[dict[str, Any]]:
     states = response.json()
     if not isinstance(states, list):
         raise HTTPException(status_code=502, detail="Invalid /api/states response")
+    _STATES_CACHE["ts"] = time.time()
+    _STATES_CACHE["data"] = states
     return states
 
 
@@ -565,13 +674,24 @@ def _query_activity_metrics_mariadb(hours: int = 24, limit: int = 1200) -> dict[
 
 
 async def _query_activity_metrics(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
-    sqlite_metrics = _query_activity_metrics_sqlite(hours=hours, limit=limit)
+    cache_key = f"{hours}:{limit}"
+    cache_item = _ACTIVITY_CACHE.get(cache_key)
+    if cache_item and (time.time() - float(cache_item.get("ts", 0.0)) < 45):
+        return cache_item["data"]
+
+    sqlite_metrics = await asyncio.to_thread(
+        _query_activity_metrics_sqlite, hours, limit
+    )
     if sqlite_metrics.get("available"):
+        _ACTIVITY_CACHE[cache_key] = {"ts": time.time(), "data": sqlite_metrics}
         return sqlite_metrics
-    mariadb_metrics = _query_activity_metrics_mariadb(hours=hours, limit=limit)
+    mariadb_metrics = await asyncio.to_thread(
+        _query_activity_metrics_mariadb, hours, limit
+    )
     if mariadb_metrics.get("available"):
+        _ACTIVITY_CACHE[cache_key] = {"ts": time.time(), "data": mariadb_metrics}
         return mariadb_metrics
-    return {
+    result = {
         "available": False,
         "reason": "No se pudo obtener metricas de SQLite ni MariaDB.",
         "window_hours": hours,
@@ -579,10 +699,294 @@ async def _query_activity_metrics(hours: int = 24, limit: int = 1200) -> dict[st
         "by_entity_id": {},
         "source": "none",
     }
+    _ACTIVITY_CACHE[cache_key] = {"ts": time.time(), "data": result}
+    return result
+
+
+def _query_dbstats_sqlite(limit: int = 2000) -> dict[str, Any]:
+    db_path = _detect_sqlite_db_path()
+    if db_path is None:
+        return {"available": False, "source": "sqlite", "by_entity_id": {}}
+
+    by_entity: dict[str, dict[str, Any]] = {}
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=8)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        metadata_ids: list[int] = []
+        entity_ids: list[str] = []
+        try:
+            cur.execute(
+                """
+                SELECT s.metadata_id AS metadata_id, sm.entity_id AS entity_id, COUNT(*) AS cnt
+                FROM states s
+                JOIN states_meta sm ON sm.metadata_id = s.metadata_id
+                GROUP BY s.metadata_id, sm.entity_id
+                ORDER BY cnt DESC
+                LIMIT ?
+                """,
+                (max(1, limit),),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                metadata_id = int(row["metadata_id"] or 0)
+                entity_id = str(row["entity_id"]).strip().lower()
+                if not entity_id:
+                    continue
+                if metadata_id > 0:
+                    metadata_ids.append(metadata_id)
+                by_entity.setdefault(entity_id, {})["db_rows_total"] = int(row["cnt"] or 0)
+        except sqlite3.DatabaseError:
+            cur.execute(
+                """
+                SELECT s.entity_id AS entity_id, COUNT(*) AS cnt
+                FROM states s
+                GROUP BY s.entity_id
+                ORDER BY cnt DESC
+                LIMIT ?
+                """,
+                (max(1, limit),),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                entity_id = str(row["entity_id"]).strip().lower()
+                if entity_id:
+                    entity_ids.append(entity_id)
+                    by_entity.setdefault(entity_id, {})["db_rows_total"] = int(row["cnt"] or 0)
+
+        # dbstats-like attr sizing but scoped to selected entities for speed.
+        try:
+            if metadata_ids:
+                placeholders = ",".join("?" for _ in metadata_ids)
+                cur.execute(
+                    f"""
+                    SELECT sm.entity_id AS entity_id, SUM(COALESCE(attr.attr_size, 0))/1024.0/1024.0 AS size_mb
+                    FROM (
+                      SELECT s.metadata_id AS metadata_id, s.attributes_id AS attributes_id
+                      FROM states s
+                      WHERE s.metadata_id IN ({placeholders})
+                      GROUP BY s.metadata_id, s.attributes_id
+                    ) entity_attrs
+                    JOIN states_meta sm ON sm.metadata_id = entity_attrs.metadata_id
+                    LEFT JOIN (
+                      SELECT attributes_id, LENGTH(shared_attrs) AS attr_size
+                      FROM state_attributes
+                    ) attr ON attr.attributes_id = entity_attrs.attributes_id
+                    GROUP BY sm.entity_id
+                    ORDER BY size_mb DESC
+                    LIMIT ?
+                    """,
+                    [*metadata_ids, max(1, limit)],
+                )
+                rows = cur.fetchall()
+            elif entity_ids:
+                placeholders = ",".join("?" for _ in entity_ids)
+                cur.execute(
+                    f"""
+                    SELECT entity_attrs.entity_id AS entity_id, SUM(COALESCE(attr.attr_size, 0))/1024.0/1024.0 AS size_mb
+                    FROM (
+                      SELECT s.entity_id AS entity_id, s.attributes_id AS attributes_id
+                      FROM states s
+                      WHERE s.entity_id IN ({placeholders})
+                      GROUP BY s.entity_id, s.attributes_id
+                    ) entity_attrs
+                    LEFT JOIN (
+                      SELECT attributes_id, LENGTH(shared_attrs) AS attr_size
+                      FROM state_attributes
+                    ) attr ON attr.attributes_id = entity_attrs.attributes_id
+                    GROUP BY entity_attrs.entity_id
+                    ORDER BY size_mb DESC
+                    LIMIT ?
+                    """,
+                    [*entity_ids, max(1, limit)],
+                )
+                rows = cur.fetchall()
+            else:
+                rows = []
+
+            for row in rows:
+                entity_id = str(row["entity_id"]).strip().lower()
+                if entity_id:
+                    by_entity.setdefault(entity_id, {})["db_attrs_mb"] = round(
+                        float(row["size_mb"] or 0.0), 4
+                    )
+        except sqlite3.DatabaseError:
+            pass
+        conn.close()
+    except Exception:
+        return {"available": False, "source": "sqlite", "by_entity_id": {}}
+
+    return {"available": True, "source": "sqlite", "by_entity_id": by_entity}
+
+
+def _query_dbstats_mariadb(limit: int = 2000) -> dict[str, Any]:
+    db_url = _extract_recorder_db_url_from_config()
+    if not db_url:
+        return {"available": False, "source": "mariadb", "by_entity_id": {}}
+    parsed = urlparse(db_url)
+    if parsed.scheme not in {"mysql", "mysql+pymysql", "mariadb", "mariadb+pymysql"}:
+        return {"available": False, "source": "mariadb", "by_entity_id": {}}
+
+    host = parsed.hostname or "core-mariadb"
+    port = parsed.port or 3306
+    user = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+    database = (parsed.path or "/").lstrip("/") or "homeassistant"
+    query_params = parse_qs(parsed.query)
+    unix_socket = query_params.get("unix_socket", [None])[0]
+    by_entity: dict[str, dict[str, Any]] = {}
+    try:
+        conn = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            unix_socket=unix_socket,
+            connect_timeout=5,
+            read_timeout=25,
+            write_timeout=25,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        with conn.cursor() as cur:
+            metadata_ids: list[int] = []
+            entity_ids: list[str] = []
+            try:
+                cur.execute(
+                    """
+                    SELECT s.metadata_id AS metadata_id, sm.entity_id AS entity_id, COUNT(*) AS cnt
+                    FROM states s
+                    JOIN states_meta sm ON sm.metadata_id = s.metadata_id
+                    GROUP BY s.metadata_id, sm.entity_id
+                    ORDER BY cnt DESC
+                    LIMIT %s
+                    """,
+                    (max(1, limit),),
+                )
+                rows = cur.fetchall()
+                for row in rows:
+                    entity_id = str(row.get("entity_id") or "").strip().lower()
+                    if not entity_id:
+                        continue
+                    try:
+                        metadata_id = int(row.get("metadata_id") or 0)
+                    except (TypeError, ValueError):
+                        metadata_id = 0
+                    if metadata_id > 0:
+                        metadata_ids.append(metadata_id)
+                    by_entity.setdefault(entity_id, {})["db_rows_total"] = int(
+                        row.get("cnt") or 0
+                    )
+            except Exception:
+                cur.execute(
+                    """
+                    SELECT s.entity_id AS entity_id, COUNT(*) AS cnt
+                    FROM states s
+                    GROUP BY s.entity_id
+                    ORDER BY cnt DESC
+                    LIMIT %s
+                    """,
+                    (max(1, limit),),
+                )
+                rows = cur.fetchall()
+                for row in rows:
+                    entity_id = str(row.get("entity_id") or "").strip().lower()
+                    if entity_id:
+                        entity_ids.append(entity_id)
+                        by_entity.setdefault(entity_id, {})["db_rows_total"] = int(
+                            row.get("cnt") or 0
+                        )
+
+            try:
+                if metadata_ids:
+                    placeholders = ",".join(["%s"] * len(metadata_ids))
+                    cur.execute(
+                        f"""
+                        SELECT sm.entity_id AS entity_id, SUM(COALESCE(attr.attr_size, 0))/1024.0/1024.0 AS size_mb
+                        FROM (
+                          SELECT s.metadata_id AS metadata_id, s.attributes_id AS attributes_id
+                          FROM states s
+                          WHERE s.metadata_id IN ({placeholders})
+                          GROUP BY s.metadata_id, s.attributes_id
+                        ) entity_attrs
+                        JOIN states_meta sm ON sm.metadata_id = entity_attrs.metadata_id
+                        LEFT JOIN (
+                          SELECT attributes_id, CHAR_LENGTH(shared_attrs) AS attr_size
+                          FROM state_attributes
+                        ) attr ON attr.attributes_id = entity_attrs.attributes_id
+                        GROUP BY sm.entity_id
+                        ORDER BY size_mb DESC
+                        LIMIT %s
+                        """,
+                        [*metadata_ids, max(1, limit)],
+                    )
+                    rows = cur.fetchall()
+                elif entity_ids:
+                    placeholders = ",".join(["%s"] * len(entity_ids))
+                    cur.execute(
+                        f"""
+                        SELECT entity_attrs.entity_id AS entity_id, SUM(COALESCE(attr.attr_size, 0))/1024.0/1024.0 AS size_mb
+                        FROM (
+                          SELECT s.entity_id AS entity_id, s.attributes_id AS attributes_id
+                          FROM states s
+                          WHERE s.entity_id IN ({placeholders})
+                          GROUP BY s.entity_id, s.attributes_id
+                        ) entity_attrs
+                        LEFT JOIN (
+                          SELECT attributes_id, CHAR_LENGTH(shared_attrs) AS attr_size
+                          FROM state_attributes
+                        ) attr ON attr.attributes_id = entity_attrs.attributes_id
+                        GROUP BY entity_attrs.entity_id
+                        ORDER BY size_mb DESC
+                        LIMIT %s
+                        """,
+                        [*entity_ids, max(1, limit)],
+                    )
+                    rows = cur.fetchall()
+                else:
+                    rows = []
+
+                for row in rows:
+                    entity_id = str(row.get("entity_id") or "").strip().lower()
+                    if entity_id:
+                        by_entity.setdefault(entity_id, {})["db_attrs_mb"] = round(
+                            float(row.get("size_mb") or 0.0), 4
+                        )
+            except Exception:
+                pass
+        conn.close()
+    except Exception:
+        return {"available": False, "source": "mariadb", "by_entity_id": {}}
+    return {"available": True, "source": "mariadb", "by_entity_id": by_entity}
+
+
+def _query_dbstats_metrics(limit: int = 2000) -> dict[str, Any]:
+    cache_key = f"limit:{limit}"
+    cache_item = _DBSTATS_CACHE.get(cache_key)
+    if cache_item and (time.time() - float(cache_item.get("ts", 0.0)) < 240):
+        return cache_item["data"]
+    sqlite_stats = _query_dbstats_sqlite(limit=limit)
+    if sqlite_stats.get("available"):
+        _DBSTATS_CACHE[cache_key] = {"ts": time.time(), "data": sqlite_stats}
+        return sqlite_stats
+    mariadb_stats = _query_dbstats_mariadb(limit=limit)
+    if mariadb_stats.get("available"):
+        _DBSTATS_CACHE[cache_key] = {"ts": time.time(), "data": mariadb_stats}
+        return mariadb_stats
+    result = {"available": False, "source": "none", "by_entity_id": {}}
+    _DBSTATS_CACHE[cache_key] = {"ts": time.time(), "data": result}
+    return result
 
 
 def _metric_sort_key(item: dict[str, Any], field: str) -> Any:
-    if field in {"state_changes", "changes_per_hour", "last_updated_ts", "battery"}:
+    if field in {
+        "state_changes",
+        "changes_per_hour",
+        "last_updated_ts",
+        "battery",
+        "db_rows_total",
+        "db_attrs_mb",
+    }:
         return float(item.get(field, 0))
     return str(item.get(field, "")).lower()
 
@@ -590,8 +994,10 @@ def _metric_sort_key(item: dict[str, Any], field: str) -> Any:
 async def _query_entity_detail_stats(entity_id: str) -> dict[str, Any]:
     windows = [1, 24, 168]
     summary: dict[str, Any] = {"windows": {}, "source": "none"}
-    for hours in windows:
-        metrics = await _query_activity_metrics(hours=hours, limit=10000)
+    metrics_list = await asyncio.gather(
+        *(_query_activity_metrics(hours=hours, limit=10000) for hours in windows)
+    )
+    for hours, metrics in zip(windows, metrics_list):
         data = metrics.get("by_entity_id", {}).get(entity_id, {})
         summary["windows"][str(hours)] = {
             "state_changes": int(data.get("state_changes", 0)),
@@ -649,10 +1055,18 @@ async def api_entities(
     sort_by: str = "state_changes",
     sort_dir: str = "desc",
 ) -> dict[str, Any]:
-    states = await _list_states()
+    states, registry, metrics, dbstats = await asyncio.gather(
+        _list_states(),
+        _get_registry_metadata(),
+        _query_activity_metrics(hours=hours, limit=4000),
+        asyncio.to_thread(_query_dbstats_metrics, 1800),
+    )
+    reg_areas = registry.get("areas", {})
+    reg_devices = registry.get("devices", {})
+    reg_entities = registry.get("entities", {})
     excluded_entities = _load_excluded_entities()
-    metrics = await _query_activity_metrics(hours=hours, limit=4000)
     metrics_map = metrics["by_entity_id"]
+    dbstats_map = dbstats["by_entity_id"]
     needle = search.strip().lower()
     domain_filter = domain.strip().lower()
     excluded_filter = excluded.strip().lower()
@@ -669,23 +1083,45 @@ async def api_entities(
         friendly_name = str(attributes.get("friendly_name", ""))
         domain_name = entity_id.split(".", 1)[0] if "." in entity_id else "unknown"
         m = metrics_map.get(normalized_entity_id, {})
+        m_db = dbstats_map.get(normalized_entity_id, {})
+        reg_entity = reg_entities.get(normalized_entity_id, {})
+        reg_device = reg_devices.get(reg_entity.get("device_id", ""), {})
         area_name = (
             str(attributes.get("area_name") or attributes.get("area") or attributes.get("suggested_area") or "").strip()
         )
-        integration_name = str(attributes.get("integration") or domain_name).strip()
-        manufacturer = str(attributes.get("manufacturer") or attributes.get("device_manufacturer") or "").strip()
-        model = str(attributes.get("model") or attributes.get("device_model") or "").strip()
+        if not area_name:
+            area_id = str(reg_entity.get("area_id") or reg_device.get("area_id") or "").strip()
+            area_name = str(reg_areas.get(area_id, "")).strip()
+        integration_name = str(
+            attributes.get("integration")
+            or reg_entity.get("platform")
+            or domain_name
+        ).strip()
+        manufacturer = str(
+            attributes.get("manufacturer")
+            or attributes.get("device_manufacturer")
+            or reg_device.get("manufacturer")
+            or ""
+        ).strip()
+        model = str(
+            attributes.get("model")
+            or attributes.get("device_model")
+            or reg_device.get("model")
+            or ""
+        ).strip()
         battery_raw = attributes.get("battery_level", attributes.get("battery"))
         try:
             battery = float(battery_raw) if battery_raw is not None else None
         except (TypeError, ValueError):
             battery = None
         state_value = str(item.get("state", ""))
+        tags = []
         tags_attr = attributes.get("labels") or attributes.get("tags") or []
         if isinstance(tags_attr, list):
-            tags = [str(tag).strip() for tag in tags_attr if str(tag).strip()]
-        else:
-            tags = []
+            tags.extend([str(tag).strip() for tag in tags_attr if str(tag).strip()])
+        reg_labels = reg_entity.get("labels") if isinstance(reg_entity.get("labels"), list) else []
+        tags.extend([str(tag).strip() for tag in reg_labels if str(tag).strip()])
+        tags = sorted({tag for tag in tags if tag})
         icon = str(attributes.get("icon", "")).strip()
 
         if needle and needle not in normalized_entity_id and needle not in friendly_name.lower():
@@ -717,6 +1153,8 @@ async def api_entities(
                 "last_updated": str(item.get("last_updated", "")),
                 "icon": icon,
                 "tags": tags,
+                "db_rows_total": int(m_db.get("db_rows_total", 0)),
+                "db_attrs_mb": float(m_db.get("db_attrs_mb", 0.0)),
             }
         )
     sort_key = sort_by if sort_by in {
@@ -732,6 +1170,8 @@ async def api_entities(
         "model",
         "battery",
         "state",
+        "db_rows_total",
+        "db_attrs_mb",
     } else "state_changes"
     reverse = sort_dir.strip().lower() != "asc"
     entities.sort(key=lambda x: _metric_sort_key(x, sort_key), reverse=reverse)
@@ -745,12 +1185,20 @@ async def api_entities(
             if "." in str(item.get("entity_id", ""))
         }
     )
+    all_areas = sorted(
+        {
+            name
+            for name in reg_areas.values()
+            if isinstance(name, str) and name.strip()
+        }
+    )
 
     return {
         "items": entities,
         "total": len(entities),
         "managed_file": str(MANAGED_LIST_FILE),
         "domains": all_domains,
+        "areas": all_areas,
         "metrics": {
             "available": metrics["available"],
             "reason": metrics["reason"],
@@ -759,6 +1207,7 @@ async def api_entities(
             "db_path": metrics.get("db_path"),
             "db_size_mb": metrics.get("db_size_mb"),
             "query_used": metrics.get("query_used"),
+            "dbstats_source": dbstats.get("source"),
         },
     }
 
