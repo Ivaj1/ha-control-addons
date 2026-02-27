@@ -1,5 +1,8 @@
 import json
 import os
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +24,7 @@ RECORDER_EXCLUDE_DIR = HA_CONFIG_DIR / "recorder_exclude_entities"
 MANAGED_LIST_FILE = RECORDER_EXCLUDE_DIR / "recorder_visual_control.yaml"
 SETUP_PATTERN = "!include_dir_merge_list recorder_exclude_entities"
 
-app = FastAPI(title="Recorder Visual Control", version="0.2.0")
+app = FastAPI(title="Recorder Visual Control", version="0.3.0")
 
 
 class TogglePayload(BaseModel):
@@ -130,6 +133,206 @@ async def _restart_core() -> None:
         raise HTTPException(status_code=502, detail=response.text)
 
 
+def _detect_sqlite_db_path() -> Path | None:
+    default_db = HA_CONFIG_DIR / "home-assistant_v2.db"
+    if default_db.exists():
+        return default_db
+    return None
+
+
+def _query_activity_metrics_sqlite(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
+    db_path = _detect_sqlite_db_path()
+    if db_path is None:
+        return {
+            "available": False,
+            "reason": "No se encontro home-assistant_v2.db (puede ser DB externa).",
+            "window_hours": hours,
+            "items": [],
+            "by_entity_id": {},
+            "source": "sqlite",
+        }
+
+    since_ts = time.time() - max(1, hours) * 3600
+    items: list[dict[str, Any]] = []
+    query_used = ""
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # HA schema with states_meta + metadata_id
+        try:
+            cur.execute(
+                """
+                SELECT
+                    sm.entity_id AS entity_id,
+                    COUNT(*) AS state_changes,
+                    MAX(s.last_updated_ts) AS last_updated_ts,
+                    MIN(s.last_updated_ts) AS first_updated_ts
+                FROM states s
+                JOIN states_meta sm ON sm.metadata_id = s.metadata_id
+                WHERE s.last_updated_ts >= ?
+                GROUP BY sm.entity_id
+                ORDER BY state_changes DESC
+                LIMIT ?
+                """,
+                (since_ts, max(1, limit)),
+            )
+            rows = cur.fetchall()
+            query_used = "states_meta"
+            for row in rows:
+                count = int(row["state_changes"] or 0)
+                items.append(
+                    {
+                        "entity_id": str(row["entity_id"]),
+                        "state_changes": count,
+                        "changes_per_hour": round(count / max(1, hours), 2),
+                        "last_updated_ts": float(row["last_updated_ts"] or 0),
+                        "first_updated_ts": float(row["first_updated_ts"] or 0),
+                    }
+                )
+        except sqlite3.DatabaseError:
+            # Legacy schema fallback (states.entity_id)
+            cur.execute(
+                """
+                SELECT
+                    s.entity_id AS entity_id,
+                    COUNT(*) AS state_changes,
+                    MAX(s.last_updated_ts) AS last_updated_ts,
+                    MIN(s.last_updated_ts) AS first_updated_ts
+                FROM states s
+                WHERE s.last_updated_ts >= ?
+                GROUP BY s.entity_id
+                ORDER BY state_changes DESC
+                LIMIT ?
+                """,
+                (since_ts, max(1, limit)),
+            )
+            rows = cur.fetchall()
+            query_used = "states_legacy"
+            for row in rows:
+                count = int(row["state_changes"] or 0)
+                items.append(
+                    {
+                        "entity_id": str(row["entity_id"]),
+                        "state_changes": count,
+                        "changes_per_hour": round(count / max(1, hours), 2),
+                        "last_updated_ts": float(row["last_updated_ts"] or 0),
+                        "first_updated_ts": float(row["first_updated_ts"] or 0),
+                    }
+                )
+        finally:
+            conn.close()
+    except Exception as err:
+        return {
+            "available": False,
+            "reason": f"No se pudieron calcular metricas: {err}",
+            "window_hours": hours,
+            "items": [],
+            "by_entity_id": {},
+            "source": "sqlite",
+        }
+
+    by_entity_id = {item["entity_id"]: item for item in items}
+    return {
+        "available": True,
+        "reason": "OK",
+        "window_hours": hours,
+        "db_path": str(db_path),
+        "db_size_mb": round(db_path.stat().st_size / (1024 * 1024), 2),
+        "query_used": query_used,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "by_entity_id": by_entity_id,
+        "source": "sqlite",
+    }
+
+
+async def _query_activity_metrics_logbook(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
+    now_utc = datetime.now(timezone.utc)
+    start_utc = now_utc - timedelta(hours=max(1, hours))
+    start_iso = start_utc.isoformat()
+    end_iso = now_utc.isoformat()
+    url = f"{CORE_HTTP_BASE}/api/logbook/{start_iso}"
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.get(
+                url,
+                headers=_auth_headers(),
+                params={"end_time": end_iso},
+            )
+        if response.status_code >= 400:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+        entries = response.json()
+        if not isinstance(entries, list):
+            raise RuntimeError("Respuesta no valida de /api/logbook")
+    except Exception as err:
+        return {
+            "available": False,
+            "reason": f"No se pudieron calcular metricas por logbook: {err}",
+            "window_hours": hours,
+            "items": [],
+            "by_entity_id": {},
+            "source": "logbook_api",
+        }
+
+    counts: dict[str, int] = {}
+    last_seen: dict[str, float] = {}
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entity_id = entry.get("entity_id") or entry.get("context_entity_id")
+        if not entity_id or not isinstance(entity_id, str) or "." not in entity_id:
+            continue
+        entity_id = entity_id.strip().lower()
+        counts[entity_id] = counts.get(entity_id, 0) + 1
+
+        when = entry.get("when")
+        ts = 0.0
+        if isinstance(when, (int, float)):
+            ts = float(when)
+        elif isinstance(when, str):
+            try:
+                ts = datetime.fromisoformat(when.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                ts = 0.0
+        if ts > last_seen.get(entity_id, 0.0):
+            last_seen[entity_id] = ts
+
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[: max(1, limit)]
+    items: list[dict[str, Any]] = []
+    for entity_id, count in ranked:
+        items.append(
+            {
+                "entity_id": entity_id,
+                "state_changes": count,
+                "changes_per_hour": round(count / max(1, hours), 2),
+                "last_updated_ts": float(last_seen.get(entity_id, 0.0)),
+                "first_updated_ts": 0.0,
+            }
+        )
+
+    return {
+        "available": True,
+        "reason": "OK",
+        "window_hours": hours,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "by_entity_id": {item["entity_id"]: item for item in items},
+        "source": "logbook_api",
+    }
+
+
+async def _query_activity_metrics(hours: int = 24, limit: int = 1200) -> dict[str, Any]:
+    sqlite_metrics = _query_activity_metrics_sqlite(hours=hours, limit=limit)
+    if sqlite_metrics.get("available"):
+        return sqlite_metrics
+    return await _query_activity_metrics_logbook(hours=hours, limit=limit)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True}
@@ -143,18 +346,26 @@ def api_setup() -> dict[str, Any]:
 @app.get("/api/status")
 async def api_status() -> dict[str, Any]:
     recorder = await _recorder_info()
+    db_path = _detect_sqlite_db_path()
     return {
         "recorder_recording": bool(recorder.get("recording", False)),
         "recorder": recorder,
         "setup": _setup_status(),
         "excluded_count": len(_load_excluded_entities()),
+        "metrics_mode": "sqlite" if db_path else "logbook_api",
+        "metrics_reason": "SQLite local detectada" if db_path else "Usando logbook API (compatible con MariaDB)",
+        "metrics_db_path": str(db_path) if db_path else None,
     }
 
 
 @app.get("/api/entities")
-async def api_entities(search: str = "", limit: int = 500) -> dict[str, Any]:
+async def api_entities(
+    search: str = "", limit: int = 500, hours: int = 24
+) -> dict[str, Any]:
     states = await _list_states()
     excluded = _load_excluded_entities()
+    metrics = await _query_activity_metrics(hours=hours, limit=4000)
+    metrics_map = metrics["by_entity_id"]
     needle = search.strip().lower()
     entities: list[dict[str, Any]] = []
 
@@ -162,26 +373,53 @@ async def api_entities(search: str = "", limit: int = 500) -> dict[str, Any]:
         entity_id = str(item.get("entity_id", ""))
         if not entity_id:
             continue
+        normalized_entity_id = entity_id.strip().lower()
         friendly_name = str(item.get("attributes", {}).get("friendly_name", ""))
         domain = entity_id.split(".", 1)[0] if "." in entity_id else "unknown"
+        m = metrics_map.get(normalized_entity_id, {})
 
-        if needle and needle not in entity_id.lower() and needle not in friendly_name.lower():
+        if needle and needle not in normalized_entity_id and needle not in friendly_name.lower():
             continue
 
         entities.append(
             {
-                "entity_id": entity_id,
+                "entity_id": normalized_entity_id,
                 "friendly_name": friendly_name,
                 "domain": domain,
-                "excluded_by_app": entity_id in excluded,
+                "excluded_by_app": normalized_entity_id in excluded,
+                "state_changes": int(m.get("state_changes", 0)),
+                "changes_per_hour": float(m.get("changes_per_hour", 0)),
+                "last_updated_ts": float(m.get("last_updated_ts", 0)),
             }
         )
 
-    entities.sort(key=lambda x: (x["domain"], x["entity_id"]))
+    entities.sort(
+        key=lambda x: (-x["state_changes"], x["domain"], x["entity_id"])
+    )
     if limit > 0:
         entities = entities[:limit]
 
-    return {"items": entities, "total": len(entities), "managed_file": str(MANAGED_LIST_FILE)}
+    return {
+        "items": entities,
+        "total": len(entities),
+        "managed_file": str(MANAGED_LIST_FILE),
+        "metrics": {
+            "available": metrics["available"],
+            "reason": metrics["reason"],
+            "window_hours": metrics["window_hours"],
+            "source": metrics.get("source"),
+            "db_path": metrics.get("db_path"),
+            "db_size_mb": metrics.get("db_size_mb"),
+            "query_used": metrics.get("query_used"),
+        },
+    }
+
+
+@app.get("/api/metrics")
+async def api_metrics(hours: int = 24, limit: int = 1000) -> dict[str, Any]:
+    metrics = await _query_activity_metrics(hours=hours, limit=limit)
+    metrics.pop("by_entity_id", None)
+    return metrics
 
 
 @app.post("/api/entities/{entity_id:path}")
@@ -309,14 +547,23 @@ async def index() -> HTMLResponse:
         <span id="setupChip" class="chip warn">Comprobando configuración...</span>
         <span id="recChip" class="chip">Comprobando recorder...</span>
         <span id="countChip" class="chip">Excluidas por app: 0</span>
+        <span id="metricChip" class="chip">Métricas: comprobando...</span>
       </div>
       <div class="controls">
         <input id="search" type="text" placeholder="Buscar por entity_id o nombre..." />
+        <select id="windowHours">
+          <option value="1">1h</option>
+          <option value="6">6h</option>
+          <option value="24" selected>24h</option>
+          <option value="72">72h</option>
+          <option value="168">7d</option>
+        </select>
         <button onclick="loadEntities()">Buscar</button>
         <button class="ghost" onclick="refreshAll()">Actualizar</button>
         <button class="warn" onclick="applyChanges()">Aplicar (reiniciar HA)</button>
       </div>
       <div id="setupHelp" class="small muted" style="margin-top:8px;"></div>
+      <div id="metricsHelp" class="small muted" style="margin-top:6px;"></div>
     </section>
 
     <section class="card">
@@ -326,12 +573,15 @@ async def index() -> HTMLResponse:
             <tr>
               <th>Entidad</th>
               <th>Nombre</th>
+              <th>Cambios</th>
+              <th>Cambios/h</th>
+              <th>Última escritura</th>
               <th>Estado en app</th>
               <th>Acción</th>
             </tr>
           </thead>
           <tbody id="tbody">
-            <tr><td colspan="4" class="muted">Cargando...</td></tr>
+            <tr><td colspan="7" class="muted">Cargando...</td></tr>
           </tbody>
         </table>
       </div>
@@ -343,8 +593,11 @@ async def index() -> HTMLResponse:
     const recChip = document.getElementById("recChip");
     const countChip = document.getElementById("countChip");
     const setupHelp = document.getElementById("setupHelp");
+    const metricsHelp = document.getElementById("metricsHelp");
     const tbody = document.getElementById("tbody");
     const searchInput = document.getElementById("search");
+    const windowHours = document.getElementById("windowHours");
+    const metricChip = document.getElementById("metricChip");
 
     async function api(path, opts = {}) {
       const res = await fetch(path, opts);
@@ -357,6 +610,12 @@ async def index() -> HTMLResponse:
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;");
+    }
+
+    function fmtTs(ts) {
+      if (!ts || Number(ts) <= 0) return "-";
+      const d = new Date(Number(ts) * 1000);
+      return d.toLocaleString();
     }
 
     async function refreshStatus() {
@@ -374,6 +633,12 @@ async def index() -> HTMLResponse:
         : "Recorder no está grabando";
 
       countChip.textContent = "Excluidas por app: " + (data.excluded_count ?? 0);
+      const mode = String(data.metrics_mode || "unknown");
+      const sqlite = mode === "sqlite";
+      metricChip.className = "chip " + (sqlite ? "ok" : "warn");
+      metricChip.textContent = sqlite
+        ? "Métricas por SQLite"
+        : "Métricas por Logbook API";
 
       if (!setup.configured) {
         setupHelp.innerHTML =
@@ -386,13 +651,27 @@ async def index() -> HTMLResponse:
     }
 
     async function loadEntities() {
-      tbody.innerHTML = "<tr><td colspan='4' class='muted'>Cargando entidades...</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='7' class='muted'>Cargando entidades...</td></tr>";
       const search = encodeURIComponent(searchInput.value || "");
-      const data = await api(`./api/entities?search=${search}&limit=600`);
+      const hours = encodeURIComponent(windowHours.value || "24");
+      const data = await api(`./api/entities?search=${search}&limit=600&hours=${hours}`);
       const items = data.items || [];
+      const metrics = data.metrics || {};
+
+      if (metrics.available) {
+        if (metrics.source === "sqlite") {
+          metricsHelp.textContent =
+            `Ventana: ${metrics.window_hours}h | Fuente: SQLite | DB: ${metrics.db_path} (${metrics.db_size_mb} MB)`;
+        } else {
+          metricsHelp.textContent =
+            `Ventana: ${metrics.window_hours}h | Fuente: Logbook API (compatible con MariaDB)`;
+        }
+      } else {
+        metricsHelp.textContent = "Métricas no disponibles: " + (metrics.reason || "desconocido");
+      }
 
       if (items.length === 0) {
-        tbody.innerHTML = "<tr><td colspan='4' class='muted'>Sin resultados.</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='7' class='muted'>Sin resultados.</td></tr>";
         return;
       }
 
@@ -402,6 +681,9 @@ async def index() -> HTMLResponse:
           <tr>
             <td class="mono">${esc(item.entity_id)}</td>
             <td>${esc(item.friendly_name || "-")}</td>
+            <td>${Number(item.state_changes || 0)}</td>
+            <td>${Number(item.changes_per_hour || 0).toFixed(2)}</td>
+            <td>${esc(fmtTs(item.last_updated_ts))}</td>
             <td class="${excluded ? "ex-on" : "ex-off"}">${excluded ? "Excluida" : "Incluida"}</td>
             <td>
               <button onclick="toggleEntity('${esc(item.entity_id)}', ${excluded ? "false" : "true"})">
@@ -434,13 +716,14 @@ async def index() -> HTMLResponse:
         await refreshStatus();
         await loadEntities();
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error: ${esc(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="muted">Error: ${esc(err.message)}</td></tr>`;
       }
     }
 
     searchInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") loadEntities();
     });
+    windowHours.addEventListener("change", () => loadEntities());
 
     refreshAll();
   </script>

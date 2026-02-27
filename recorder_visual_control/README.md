@@ -5,4 +5,5 @@ Home Assistant add-on that provides a visual panel to include/exclude entities f
 - Ingress UI inside Home Assistant.
 - Search entities from `/api/states`.
 - Exclude/include per entity, managed in a dedicated YAML list file.
+- Activity metrics per entity (changes, changes/hour, last write) with selectable time window.
 - Apply changes with Home Assistant Core restart.

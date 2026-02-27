@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Added activity metrics per entity: changes in selected window, changes/hour and last write.
+- Added metrics window selector (1h, 6h, 24h, 72h, 7d).
+- Added dual metrics backend:
+  - SQLite direct query when `home-assistant_v2.db` is local.
+  - Logbook API fallback for external DB setups (e.g., MariaDB).
+- Sorted entity list by activity to identify high-write entities quickly.
+
 ## 0.2.0
 
 - Reworked add-on to manage recorder inclusion/exclusion by entity.

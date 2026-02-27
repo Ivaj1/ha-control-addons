@@ -9,6 +9,10 @@ Controla visualmente el `recorder` por entidad/sensor desde un panel sencillo.
 - Guarda la lista gestionada por la app en:
   - `/homeassistant/recorder_exclude_entities/recorder_visual_control.yaml`
 - Muestra estado real del recorder usando `recorder/info`.
+- Muestra métricas de actividad por entidad:
+  - cambios en ventana de tiempo
+  - cambios por hora
+  - última escritura detectada
 - Incluye botón para aplicar cambios solicitando reinicio de Core.
 
 ## Configuración necesaria (una vez)
@@ -26,6 +30,11 @@ Esto permite que el add-on escriba su lista de exclusión sin pisar otras listas
 ## Nota importante
 
 Los cambios de filtros de `recorder` se aplican al reiniciar Home Assistant Core.
+
+## Métricas con MariaDB
+
+Si usas MariaDB u otra DB externa, la app calcula métricas usando la API de Logbook de Home Assistant.
+Si usas SQLite local (`home-assistant_v2.db`), usa consulta directa a DB.
 
 ## Instalación
 
