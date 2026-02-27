@@ -5,6 +5,11 @@ Controla visualmente el `recorder` por entidad/sensor desde un panel sencillo.
 ## Qué hace
 
 - Lista entidades de Home Assistant.
+- Filtros y ordenación tipo panel de entidades:
+  - búsqueda
+  - filtro por dominio
+  - filtro incluidas/excluidas
+  - orden por columnas
 - Permite excluir o incluir entidades para recorder desde UI.
 - Guarda la lista gestionada por la app en:
   - `/homeassistant/recorder_exclude_entities/recorder_visual_control.yaml`
@@ -14,6 +19,7 @@ Controla visualmente el `recorder` por entidad/sensor desde un panel sencillo.
   - cambios por hora
   - última escritura detectada
 - Incluye botón para aplicar cambios solicitando reinicio de Core.
+- Incluye panel de detalle por entidad con métricas de 1h, 24h y 7d y acceso directo a la entidad en Home Assistant.
 
 ## Configuración necesaria (una vez)
 
@@ -33,8 +39,8 @@ Los cambios de filtros de `recorder` se aplican al reiniciar Home Assistant Core
 
 ## Métricas con MariaDB
 
-Si usas MariaDB u otra DB externa, la app calcula métricas usando la API de Logbook de Home Assistant.
-Si usas SQLite local (`home-assistant_v2.db`), usa consulta directa a DB.
+Si usas SQLite local (`home-assistant_v2.db`), la app usa consulta directa a SQLite.
+Si usas MariaDB/MySQL en `recorder.db_url`, la app consulta esa base directamente.
 
 ## Instalación
 

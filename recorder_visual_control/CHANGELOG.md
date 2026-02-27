@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.0
+
+- New professional dark UI with full control dashboard.
+- Added entities-style filtering and sorting:
+  - search
+  - domain filter
+  - included/excluded filter
+  - sort field + direction
+  - clickable sortable table headers
+- Added entity details panel:
+  - current state and key attributes
+  - detailed recorder activity windows (1h, 24h, 7d)
+  - direct button to open entity page in Home Assistant.
+- Added entity details API endpoint: `/api/entity/{entity_id}/details`.
+
+## 0.4.1
+
+- Reworked metrics backend to avoid heavy logbook queries that can overload Home Assistant Core.
+- Metrics now follow `dbstats` style:
+  - SQLite direct queries when local DB is present.
+  - MariaDB/MySQL direct queries using recorder `db_url`.
+- Added recorder service controls in UI:
+  - enable/disable
+  - global purge
+  - purge by selected entities/domains/globs
+
+## 0.4.0
+
+- Added visual recorder controls:
+  - `recorder.enable`
+  - `recorder.disable`
+- Added visual purge controls:
+  - Global `recorder.purge` with `keep_days`, `repack`, `apply_filter`
+  - `recorder.purge_entities` for selected entities, domains, or globs
+- Added table multi-select to launch purge for selected entities.
+- Updated UI styling to align better with Home Assistant look and theme variables.
+
 ## 0.3.0
 
 - Added activity metrics per entity: changes in selected window, changes/hour and last write.
