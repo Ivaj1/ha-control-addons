@@ -870,493 +870,940 @@ async def index() -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Recorder Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #111317;
-      --panel: #171a1f;
-      --panel-2: #1a1d22;
-      --line: #2a2f38;
-      --line-soft: #20252d;
-      --text: #e6e8eb;
-      --muted: #a8b0bb;
-      --accent: #00b8ff;
-      --accent-bg: #073547;
-      --danger: #d35050;
-      --ok: #31b16b;
-      --radius: 12px;
+      --bg:        #080b10;
+      --panel:     #0d1018;
+      --panel-2:   #111520;
+      --sidebar-bg:#090c12;
+      --line:      #1a2030;
+      --line-soft: #131825;
+      --text:      #dce4ef;
+      --muted:     #5a6880;
+      --muted-2:   #8898b0;
+      --accent:    #10b981;
+      --accent-dim:#064032;
+      --accent-glow: rgba(16,185,129,.15);
+      --danger:    #f87171;
+      --danger-dim:#3b0f0f;
+      --warn:      #fbbf24;
+      --radius-sm: 6px;
+      --radius:    10px;
+      --radius-lg: 16px;
     }
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: Roboto, "Segoe UI", sans-serif;
-      min-height: 100vh;
-    }
-    .topbar {
-      height: 56px;
-      background: #14171c;
-      border-bottom: 1px solid var(--line);
-      display: grid;
-      grid-template-columns: 64px 1fr 64px;
-      align-items: center;
-    }
-    .topbar .back {
-      justify-self: center;
-      color: #cfd5dd;
-      font-size: 24px;
-      line-height: 1;
-      user-select: none;
-    }
-    .tabs {
-      display: flex;
-      justify-content: center;
-      gap: 36px;
-      align-items: center;
-    }
-    .tab {
-      height: 56px;
-      display: flex;
-      align-items: center;
-      color: #cdd4dc;
-      font-size: 14px;
-      border-bottom: 2px solid transparent;
-      cursor: default;
-    }
-    .tab.active {
-      color: #9ee7ff;
-      border-bottom-color: var(--accent);
-    }
-    .shell {
-      display: grid;
-      grid-template-columns: 170px 1fr;
-      min-height: calc(100vh - 56px);
-    }
-    .sidebar {
-      border-right: 1px solid var(--line);
-      background: #0f1216;
-    }
-    .sidebar-content {
-      padding-top: 8px;
-    }
-    .filters-btn {
-      margin: 8px;
-      width: calc(100% - 16px);
-      height: 40px;
-      border: 1px solid #1b4b5d;
-      border-radius: 14px;
-      background: #063345;
-      color: #ddf6ff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      font-weight: 500;
-    }
-    .section {
-      border-top: 1px solid var(--line-soft);
-    }
-    .section-head {
-      width: 100%;
-      height: 58px;
-      background: transparent;
-      color: #e5e9ef;
-      border: 0;
-      border-bottom: 1px solid var(--line-soft);
-      text-align: left;
-      padding: 0 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 36px;
-      font-weight: 500;
-      cursor: pointer;
-    }
-    .section-head small {
-      font-size: 14px;
-      margin-left: auto;
-      color: var(--muted);
-      font-weight: 400;
-    }
-    .section-items {
-      display: none;
-      padding: 8px 10px 10px 22px;
-    }
-    .section.open .section-items { display: block; }
-    .section-item {
-      display: block;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
       font-size: 13px;
-      color: #d6dbe2;
-      margin: 7px 0;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
     }
-    .main {
-      display: grid;
-      grid-template-rows: auto 1fr;
-      min-width: 0;
-    }
-    .toolbar {
+
+    /* ── TOPBAR ─────────────────────────────────── */
+    .topbar {
+      height: 52px;
+      background: var(--panel);
       border-bottom: 1px solid var(--line);
-      background: #13171d;
-      padding: 8px 10px;
-      display: flex;
+      display: grid;
+      grid-template-columns: 52px 1fr 52px;
       align-items: center;
-      gap: 8px;
-      position: relative;
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
-    .chip-icon {
-      width: 34px;
-      height: 34px;
-      border-radius: 9px;
-      border: 1px solid var(--line);
-      background: #1a1f27;
-      color: #d0d7df;
+    .topbar-back {
+      justify-self: center;
+      color: var(--muted-2);
+      font-size: 18px;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
       display: grid;
       place-items: center;
+      border-radius: var(--radius-sm);
+      transition: background .15s, color .15s;
+    }
+    .topbar-back:hover { background: var(--line); color: var(--text); }
+    .topbar-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .topbar-logo {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .topbar-logo svg { width: 13px; height: 13px; fill: #fff; }
+    .topbar-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: .02em;
+    }
+    .topbar-badge {
+      font-size: 10px;
+      font-weight: 500;
+      font-family: "IBM Plex Mono", monospace;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 1px 5px;
+      opacity: .9;
+    }
+    .topbar-menu-btn {
+      justify-self: center;
+      color: var(--muted-2);
+      font-size: 18px;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: var(--radius-sm);
+    }
+
+    /* ── LAYOUT ─────────────────────────────────── */
+    .shell {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      min-height: calc(100vh - 52px);
+    }
+
+    /* ── SIDEBAR ────────────────────────────────── */
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 12px 12px 8px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 0 4px;
+      margin-bottom: 4px;
+    }
+    .filters-btn {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--panel-2);
+      color: var(--muted-2);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .filters-btn:hover { border-color: var(--accent); color: var(--text); }
+    .sidebar-content { flex: 1; overflow-y: auto; }
+    .section { border-bottom: 1px solid var(--line-soft); }
+    .section-head {
+      width: 100%;
+      height: 36px;
+      background: transparent;
+      color: var(--muted-2);
+      border: 0;
+      text-align: left;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: inherit;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color .15s;
+    }
+    .section-head:hover { color: var(--text); }
+    .section-head .chevron {
+      margin-left: auto;
+      font-size: 9px;
+      transition: transform .2s;
+      color: var(--muted);
+    }
+    .section.open .chevron { transform: rotate(180deg); }
+    .section-count {
+      font-size: 10px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-radius: 3px;
+      padding: 0 4px;
+      font-weight: 500;
+      display: none;
+    }
+    .section-count.visible { display: inline; }
+    .section-items { display: none; padding: 4px 8px 8px; }
+    .section.open .section-items { display: block; }
+    .section-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--muted-2);
+      padding: 4px 4px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: color .1s, background .1s;
+    }
+    .section-item:hover { color: var(--text); background: var(--line-soft); }
+    .section-item input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px; }
+
+    /* ── MAIN ───────────────────────────────────── */
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: var(--bg);
+    }
+
+    /* ── TOOLBAR ────────────────────────────────── */
+    .toolbar {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--muted-2);
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .search-wrap {
+      flex: 1;
+      position: relative;
+      min-width: 0;
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 13px;
+      pointer-events: none;
     }
     .search {
-      flex: 1;
-      height: 34px;
+      width: 100%;
+      height: 32px;
       border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #191d24;
+      border-radius: var(--radius-sm);
+      background: var(--panel-2);
       color: var(--text);
-      padding: 0 13px;
-      font-size: 14px;
+      padding: 0 10px 0 30px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .15s;
     }
+    .search:focus { border-color: var(--accent); }
+    .search::placeholder { color: var(--muted); }
     .menu-btn {
-      height: 34px;
-      border-radius: 11px;
+      height: 32px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--line);
-      background: #22262d;
-      color: #dde4ec;
-      padding: 0 14px;
-      font-size: 14px;
+      background: var(--panel-2);
+      color: var(--muted-2);
+      padding: 0 10px;
+      font-size: 12px;
+      font-family: inherit;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
     }
+    .menu-btn:hover { border-color: var(--accent); color: var(--text); }
+    .toolbar-sep {
+      width: 1px;
+      height: 20px;
+      background: var(--line);
+      flex-shrink: 0;
+    }
+
+    /* ── DROPDOWN MENUS ─────────────────────────── */
     .menu {
       position: absolute;
-      top: 48px;
-      z-index: 20;
-      width: 188px;
-      border: 1px solid #4b515d;
-      border-radius: 12px;
-      background: #1b1f25;
-      box-shadow: 0 8px 24px rgba(0,0,0,.5);
-      padding: 6px 0;
+      top: 44px;
+      z-index: 200;
+      min-width: 180px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      box-shadow: 0 12px 32px rgba(0,0,0,.6);
+      padding: 4px;
       display: none;
     }
     .menu.show { display: block; }
     .menu-item {
-      width: calc(100% - 12px);
-      margin: 2px 6px;
-      height: 34px;
-      border-radius: 6px;
-      border: 1px solid transparent;
+      width: 100%;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      border: 0;
       background: transparent;
-      color: #dbe1e8;
+      color: var(--muted-2);
       text-align: left;
       padding: 0 10px;
-      font-size: 15px;
+      font-size: 13px;
+      font-family: inherit;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background .1s, color .1s;
     }
-    .menu-item.active {
-      border-color: #009edb;
-      background: #022f43;
-      color: #4ad4ff;
+    .menu-item:hover { background: var(--line); color: var(--text); }
+    .menu-item.active { background: var(--accent-dim); color: var(--accent); }
+    .menu-item.active::before { content: "✓"; font-size: 11px; margin-right: 2px; }
+
+    /* ── QUICK ACTIONS MENU ─────────────────────── */
+    .quick {
+      position: absolute;
+      right: 12px;
+      top: 44px;
+      min-width: 220px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 4px;
+      display: none;
+      z-index: 200;
+      box-shadow: 0 12px 32px rgba(0,0,0,.6);
     }
+    .quick.show { display: block; }
+    .quick-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 6px 10px 2px;
+    }
+    .quick button {
+      width: 100%;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted-2);
+      text-align: left;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .1s, color .1s;
+    }
+    .quick button:hover { background: var(--line); color: var(--text); }
+    .quick button.danger:hover { background: var(--danger-dim); color: var(--danger); }
+    .quick-sep { height: 1px; background: var(--line-soft); margin: 4px 8px; }
+
+    /* ── TABLE ──────────────────────────────────── */
     .table-wrap {
-      min-width: 0;
+      flex: 1;
       overflow: auto;
-      height: calc(100vh - 104px);
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1100px;
-      font-size: 13px;
+      min-width: 900px;
     }
     thead th {
       position: sticky;
       top: 0;
-      background: #161a20;
-      color: #d6dde5;
+      background: var(--panel);
+      color: var(--muted-2);
       border-bottom: 1px solid var(--line);
       text-align: left;
-      font-weight: 600;
-      height: 40px;
-      padding: 0 10px;
+      font-weight: 500;
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      height: 36px;
+      padding: 0 12px;
       white-space: nowrap;
+      user-select: none;
     }
+    thead th:first-child { padding-left: 16px; }
     tbody td {
-      border-bottom: 1px solid #1f242d;
-      height: 44px;
-      padding: 0 10px;
-      color: #d8dde4;
+      border-bottom: 1px solid var(--line-soft);
+      height: 42px;
+      padding: 0 12px;
+      color: var(--muted-2);
       white-space: nowrap;
     }
-    tbody tr:hover { background: #181d24; }
-    .col-check { width: 34px; }
-    .col-icon { width: 32px; text-align: center; color: #7fd5ff; }
-    .col-device { min-width: 260px; }
-    .device-link { color: #e8edf3; cursor: pointer; }
-    .device-link:hover { color: #87dfff; }
-    .battery { text-align: right; min-width: 70px; }
-    .group-row td {
-      height: 30px;
-      background: #10151c;
-      color: #8bc2d8;
-      font-weight: 600;
-      border-top: 1px solid #2a3340;
-      border-bottom: 1px solid #2a3340;
+    tbody td:first-child { padding-left: 16px; }
+    tbody tr { transition: background .1s; }
+    tbody tr:hover { background: var(--line-soft); }
+    tbody tr:hover td { color: var(--text); }
+    .col-check { width: 36px; }
+    .col-icon { width: 36px; text-align: center; }
+    .col-device { min-width: 240px; }
+    .device-name {
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 500;
+      transition: color .1s;
     }
-    .fab {
-      position: fixed;
-      right: 16px;
-      bottom: 14px;
-      height: 42px;
-      border-radius: 22px;
-      border: 0;
-      background: #0aa9e9;
-      color: #dff8ff;
-      padding: 0 18px;
-      font-weight: 600;
-      font-size: 22px;
+    .device-name:hover { color: var(--accent); }
+    .device-id {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+    .badge {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 500;
+      font-family: "IBM Plex Mono", monospace;
     }
-    .fab span { font-size: 22px; line-height: 1; }
-    .fab small { font-size: 14px; }
+    .badge-excluded { background: var(--danger-dim); color: var(--danger); }
+    .battery-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+    }
+    .battery-track {
+      width: 28px;
+      height: 8px;
+      background: var(--line);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .battery-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--accent);
+      transition: width .3s;
+    }
+    .battery-fill.low { background: var(--danger); }
+    .battery-fill.mid { background: var(--warn); }
+    .icon-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+    }
+    .group-row td {
+      height: 28px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: .4; }
+    .empty-state p { font-size: 13px; }
+
+    /* ── MODAL ──────────────────────────────────── */
     .modal-bg {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,.55);
+      background: rgba(0,0,0,.7);
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 40;
+      z-index: 400;
+      backdrop-filter: blur(4px);
     }
     .modal-bg.show { display: flex; }
     .modal {
-      width: 440px;
-      max-width: calc(100vw - 22px);
-      background: #1a1d22;
-      border-radius: 24px;
-      border: 1px solid #2c333d;
-      padding: 18px 20px;
+      width: 420px;
+      max-width: calc(100vw - 24px);
+      background: var(--panel-2);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      box-shadow: 0 24px 64px rgba(0,0,0,.7);
+      overflow: hidden;
     }
-    .modal h3 {
-      margin: 0;
-      font-size: 38px;
-      font-weight: 500;
-    }
-    .modal-top {
+    .modal-header {
       display: flex;
-      gap: 12px;
       align-items: center;
-      margin-bottom: 10px;
+      justify-content: space-between;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--line-soft);
     }
-    .col-item {
-      height: 46px;
-      display: grid;
-      grid-template-columns: 28px 1fr 28px;
-      align-items: center;
-      color: #d8dde4;
-      border-bottom: 1px solid #242a33;
-      font-size: 32px;
+    .modal-header h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
     }
-    .col-item .toggle {
-      justify-self: end;
+    .modal-close {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 0;
+      background: transparent;
+      color: var(--muted-2);
+      font-size: 16px;
       cursor: pointer;
-      opacity: .86;
+      display: grid;
+      place-items: center;
+      transition: background .1s, color .1s;
     }
-    .modal-actions {
-      margin-top: 14px;
+    .modal-close:hover { background: var(--line); color: var(--text); }
+    .modal-body { padding: 8px 0; }
+    .col-item {
+      height: 44px;
+      display: grid;
+      grid-template-columns: 36px 1fr 44px;
+      align-items: center;
+      color: var(--text);
+      border-bottom: 1px solid var(--line-soft);
+      padding: 0 18px;
+      font-size: 13px;
+    }
+    .col-item:last-child { border-bottom: 0; }
+    .col-drag { color: var(--muted); font-size: 12px; cursor: grab; }
+    .col-toggle {
+      justify-self: center;
+      cursor: pointer;
+      width: 36px;
+      height: 20px;
+      background: var(--line);
+      border-radius: 10px;
+      position: relative;
+      transition: background .2s;
+    }
+    .col-toggle.on { background: var(--accent); }
+    .col-toggle::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .2s;
+    }
+    .col-toggle.on::after { transform: translateX(16px); }
+    .modal-footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      padding: 12px 18px;
+      border-top: 1px solid var(--line-soft);
     }
-    .link-btn {
+    .btn-ghost {
       border: 0;
       background: transparent;
-      color: #0cc2ff;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
       padding: 0;
-      font-weight: 600;
-      font-size: 34px;
     }
-    .done-btn {
-      height: 42px;
-      border-radius: 22px;
+    .btn-ghost:hover { text-decoration: underline; }
+    .btn-primary {
+      height: 34px;
+      border-radius: var(--radius-sm);
       border: 0;
-      background: #0aa9e9;
-      color: #ebfbff;
-      padding: 0 18px;
-      font-weight: 700;
-      font-size: 34px;
+      background: var(--accent);
+      color: #fff;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity .15s;
     }
+    .btn-primary:hover { opacity: .88; }
+
+    /* ── DRAWER ─────────────────────────────────── */
     .drawer {
       position: fixed;
-      top: 56px;
+      top: 52px;
       right: 0;
-      width: 380px;
-      max-width: 95vw;
+      width: 360px;
+      max-width: 92vw;
       bottom: 0;
-      background: #191d23;
-      border-left: 1px solid #2d353f;
-      padding: 14px;
+      background: var(--panel-2);
+      border-left: 1px solid var(--line);
       transform: translateX(100%);
-      transition: transform .22s ease;
-      z-index: 30;
-      overflow: auto;
+      transition: transform .24s cubic-bezier(.4,0,.2,1);
+      z-index: 300;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     .drawer.show { transform: translateX(0); }
-    .drawer h4 { margin: 0 0 8px; font-size: 34px; }
-    .drawer .label { color: var(--muted); font-size: 32px; }
-    .drawer .val { font-size: 33px; margin-bottom: 9px; }
-    .drawer .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .drawer button {
-      height: 34px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      background: #242a33;
-      color: #dbe4ed;
-      padding: 0 10px;
-      font-size: 32px;
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
     }
-    .quick {
-      position: absolute;
-      right: 42px;
-      top: 48px;
-      background: #1b1f25;
-      border: 1px solid #444d59;
-      border-radius: 12px;
-      padding: 6px;
-      display: none;
-      z-index: 21;
-      width: 230px;
+    .drawer-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
     }
-    .quick.show { display: block; }
-    .quick button {
-      width: 100%;
+    .drawer-close {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
       border: 0;
-      border-radius: 8px;
       background: transparent;
-      color: #dbe3ec;
-      text-align: left;
-      padding: 9px 10px;
-      font-size: 34px;
+      color: var(--muted-2);
+      font-size: 15px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background .1s, color .1s;
     }
-    .quick button:hover { background: #283140; }
-    @media (max-width: 900px) {
+    .drawer-close:hover { background: var(--line); color: var(--text); }
+    .drawer-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .drawer-entity-id {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      margin-bottom: 16px;
+      word-break: break-all;
+    }
+    .drawer-field { margin-bottom: 12px; }
+    .drawer-field-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .drawer-field-value {
+      font-size: 13px;
+      color: var(--text);
+    }
+    .drawer-stats {
+      background: var(--panel);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin: 16px 0;
+    }
+    .drawer-stat-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .drawer-stat-row:last-child { border-bottom: 0; }
+    .drawer-stat {
+      padding: 10px 12px;
+      border-right: 1px solid var(--line-soft);
+    }
+    .drawer-stat:last-child { border-right: 0; }
+    .drawer-stat-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+    .drawer-stat-num {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      font-family: "IBM Plex Mono", monospace;
+    }
+    .drawer-stat-sub { font-size: 10px; color: var(--muted-2); margin-top: 1px; }
+    .drawer-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .drawer-btn {
+      height: 36px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color .15s, background .15s;
+    }
+    .drawer-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .drawer-btn.exclude-btn { color: var(--danger); border-color: var(--danger-dim); }
+    .drawer-btn.exclude-btn:hover { background: var(--danger-dim); border-color: var(--danger); }
+
+    /* ── STATUS BAR ─────────────────────────────── */
+    .statusbar {
+      height: 26px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 14px;
+      flex-shrink: 0;
+    }
+    .status-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--muted-2);
+      font-family: "IBM Plex Mono", monospace;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .status-dot.ok { background: var(--accent); }
+    .status-dot.err { background: var(--danger); }
+
+    /* ── SCROLLBAR ──────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* ── RESPONSIVE ─────────────────────────────── */
+    @media (max-width: 860px) {
       .shell { grid-template-columns: 1fr; }
       .sidebar {
         position: fixed;
         z-index: 50;
-        top: 56px;
+        top: 52px;
         bottom: 0;
-        width: 170px;
+        width: 220px;
         transform: translateX(-100%);
-        transition: transform .2s ease;
+        transition: transform .22s cubic-bezier(.4,0,.2,1);
+        box-shadow: 4px 0 24px rgba(0,0,0,.5);
       }
       .sidebar.open { transform: translateX(0); }
+      .menu-btn.hide-sm { display: none; }
     }
   </style>
 </head>
 <body>
   <header class="topbar">
-    <div class="back">←</div>
-    <nav class="tabs">
-      <div class="tab">Integraciones</div>
-      <div class="tab active">Dispositivos</div>
-      <div class="tab">Entidades</div>
-      <div class="tab">Ayudantes</div>
-    </nav>
-    <div style="justify-self:center;color:#cfd5dd;">⋮</div>
+    <div class="topbar-back" title="Volver">&#8592;</div>
+    <div class="topbar-title">
+      <div class="topbar-logo">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="8" cy="8" r="3.5"/>
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="topbar-name">Recorder Control</span>
+      <span class="topbar-badge" id="dbBadge">—</span>
+    </div>
+    <div class="topbar-menu-btn">&#8942;</div>
   </header>
+
   <div class="shell">
     <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-label">Filtros</div>
+        <button id="mobileFiltersBtn" class="filters-btn">
+          <span>&#9776;</span> Cerrar panel
+        </button>
+      </div>
       <div class="sidebar-content">
-        <button id="mobileFiltersBtn" class="filters-btn">☰ Filtros</button>
         <div class="section" data-section="areas">
-          <button class="section-head" onclick="toggleSection('areas')">⌄ Áreas <small id="countAreas"></small></button>
+          <button class="section-head" onclick="toggleSection('areas')">
+            Áreas <span class="section-count" id="countAreas"></span>
+            <span class="chevron">&#9660;</span>
+          </button>
           <div class="section-items" id="itemsAreas"></div>
         </div>
         <div class="section" data-section="integrations">
-          <button class="section-head" onclick="toggleSection('integrations')">⌄ Integraciones <small id="countIntegrations"></small></button>
+          <button class="section-head" onclick="toggleSection('integrations')">
+            Integraciones <span class="section-count" id="countIntegrations"></span>
+            <span class="chevron">&#9660;</span>
+          </button>
           <div class="section-items" id="itemsIntegrations"></div>
         </div>
         <div class="section" data-section="states">
-          <button class="section-head" onclick="toggleSection('states')">⌄ Estado <small id="countStates"></small></button>
+          <button class="section-head" onclick="toggleSection('states')">
+            Estado <span class="section-count" id="countStates"></span>
+            <span class="chevron">&#9660;</span>
+          </button>
           <div class="section-items" id="itemsStates"></div>
         </div>
         <div class="section" data-section="tags">
-          <button class="section-head" onclick="toggleSection('tags')">⌄ Etiquetas <small id="countTags"></small></button>
+          <button class="section-head" onclick="toggleSection('tags')">
+            Etiquetas <span class="section-count" id="countTags"></span>
+            <span class="chevron">&#9660;</span>
+          </button>
           <div class="section-items" id="itemsTags"></div>
         </div>
       </div>
     </aside>
+
     <main class="main">
       <div class="toolbar">
-        <button class="chip-icon" onclick="toggleSidebar()">☰</button>
-        <input id="search" class="search" placeholder="Buscar dispositivos">
-        <button id="groupBtn" class="menu-btn" onclick="toggleMenu('groupMenu')">Agrupar por <span>▾</span></button>
-        <button id="sortBtn" class="menu-btn" onclick="toggleMenu('sortMenu')">Ordenar por Área <span>▾</span></button>
-        <button class="chip-icon" onclick="openCustomize()">▦</button>
-        <button class="chip-icon" onclick="toggleQuickMenu()">⋮</button>
+        <button class="icon-btn" onclick="toggleSidebar()" title="Filtros">&#9776;</button>
+        <div class="search-wrap">
+          <span class="search-icon">&#128269;</span>
+          <input id="search" class="search" placeholder="Buscar entidades, dispositivos, áreas…">
+        </div>
+        <div class="toolbar-sep"></div>
+        <button id="groupBtn" class="menu-btn hide-sm" onclick="toggleMenu('groupMenu')">Agrupar <span>&#9662;</span></button>
+        <button id="sortBtn" class="menu-btn hide-sm" onclick="toggleMenu('sortMenu')">Ordenar <span>&#9662;</span></button>
+        <div class="toolbar-sep"></div>
+        <button class="icon-btn" onclick="openCustomize()" title="Columnas">&#9638;</button>
+        <button class="icon-btn" onclick="toggleQuickMenu()" title="Acciones">&#8942;</button>
         <div id="groupMenu" class="menu"></div>
         <div id="sortMenu" class="menu"></div>
         <div id="quickMenu" class="quick">
-          <button onclick="setRecorder(true)">Activar recorder</button>
-          <button onclick="setRecorder(false)">Desactivar recorder</button>
-          <button onclick="purgeGlobal()">Purge global</button>
-          <button onclick="purgeSelected()">Purge entidades seleccionadas</button>
-          <button onclick="applyChanges()">Aplicar filtros (reiniciar HA)</button>
+          <div class="quick-section-label">Recorder</div>
+          <button onclick="setRecorder(true)">&#9654; Activar recorder</button>
+          <button onclick="setRecorder(false)">&#9632; Desactivar recorder</button>
+          <div class="quick-sep"></div>
+          <div class="quick-section-label">Purge</div>
+          <button onclick="purgeGlobal()" class="danger">&#128465; Purge global</button>
+          <button onclick="purgeSelected()" class="danger">&#128465; Purge seleccionadas</button>
+          <div class="quick-sep"></div>
+          <button onclick="applyChanges()" class="danger">&#9888; Aplicar filtros (reiniciar HA)</button>
         </div>
       </div>
+
       <div class="table-wrap">
         <table>
           <thead>
             <tr id="tableHead"></tr>
           </thead>
           <tbody id="tbody">
-            <tr><td colspan="12">Cargando...</td></tr>
+            <tr><td colspan="12" style="text-align:center;padding:40px;color:var(--muted)">Cargando…</td></tr>
           </tbody>
         </table>
       </div>
+
+      <div class="statusbar">
+        <div class="status-chip">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">—</span>
+        </div>
+        <div class="status-chip" id="rowCountChip"></div>
+      </div>
     </main>
   </div>
-  <button class="fab"><span>＋</span><small>Añadir dispositivo</small></button>
 
+  <!-- Customize columns modal -->
   <div id="customizeModalBg" class="modal-bg">
     <div class="modal">
-      <div class="modal-top"><span style="font-size:38px;cursor:pointer" onclick="closeCustomize()">✕</span><h3>Personalizar</h3></div>
-      <div id="columnsList"></div>
-      <div class="modal-actions">
-        <button class="link-btn" onclick="restoreColumns()">Restaurar los valores predeterminados</button>
-        <button class="done-btn" onclick="closeCustomize()">Hecho</button>
+      <div class="modal-header">
+        <h3>Personalizar columnas</h3>
+        <button class="modal-close" onclick="closeCustomize()">&#10005;</button>
+      </div>
+      <div class="modal-body">
+        <div id="columnsList"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="restoreColumns()">Restaurar valores predeterminados</button>
+        <button class="btn-primary" onclick="closeCustomize()">Hecho</button>
       </div>
     </div>
   </div>
 
+  <!-- Entity detail drawer -->
   <aside id="entityDrawer" class="drawer">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h4>Entidad</h4>
-      <button onclick="closeDrawer()" style="background:transparent;border:0;color:#dbe4ed;font-size:34px;cursor:pointer">✕</button>
+    <div class="drawer-header">
+      <span class="drawer-title">Detalle de entidad</span>
+      <button class="drawer-close" onclick="closeDrawer()">&#10005;</button>
     </div>
-    <div class="label">ID</div><div id="dEntityId" class="val mono"></div>
-    <div class="label">Nombre</div><div id="dName" class="val"></div>
-    <div class="label">Estado actual</div><div id="dState" class="val"></div>
-    <div class="label">1h</div><div id="d1h" class="val"></div>
-    <div class="label">24h</div><div id="d24h" class="val"></div>
-    <div class="label">7d</div><div id="d7d" class="val"></div>
-    <div class="label">Último cambio</div><div id="dLastChanged" class="val"></div>
-    <div class="label">Última actualización</div><div id="dLastUpdated" class="val"></div>
-    <div class="actions">
-      <button id="dOpenHA">Abrir en Home Assistant</button>
-      <button id="dToggleExclusion">Toggle recorder</button>
+    <div class="drawer-body">
+      <div id="dEntityId" class="drawer-entity-id"></div>
+
+      <div class="drawer-field">
+        <div class="drawer-field-label">Nombre</div>
+        <div id="dName" class="drawer-field-value"></div>
+      </div>
+      <div class="drawer-field">
+        <div class="drawer-field-label">Estado actual</div>
+        <div id="dState" class="drawer-field-value"></div>
+      </div>
+      <div class="drawer-field">
+        <div class="drawer-field-label">Último cambio</div>
+        <div id="dLastChanged" class="drawer-field-value"></div>
+      </div>
+      <div class="drawer-field">
+        <div class="drawer-field-label">Última actualización</div>
+        <div id="dLastUpdated" class="drawer-field-value"></div>
+      </div>
+
+      <div class="drawer-stats">
+        <div class="drawer-stat-row">
+          <div class="drawer-stat">
+            <div class="drawer-stat-label">1 hora</div>
+            <div id="d1hNum" class="drawer-stat-num">—</div>
+            <div id="d1hRate" class="drawer-stat-sub"></div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-label">24 horas</div>
+            <div id="d24hNum" class="drawer-stat-num">—</div>
+            <div id="d24hRate" class="drawer-stat-sub"></div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-label">7 días</div>
+            <div id="d7dNum" class="drawer-stat-num">—</div>
+            <div id="d7dRate" class="drawer-stat-sub"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-actions">
+        <button class="drawer-btn" id="dOpenHA">&#8599; Abrir en Home Assistant</button>
+        <button class="drawer-btn exclude-btn" id="dToggleExclusion">Toggle recorder</button>
+      </div>
     </div>
   </aside>
 
@@ -1454,9 +1901,9 @@ async def index() -> HTMLResponse:
         <button class="menu-item ${state.sortBy === key ? "active" : ""}" onclick="setSortBy('${key}')">${label}</button>
       `).join("");
       const sortLabel = sortOptions.find(([k]) => k === state.sortBy)?.[1] || "Área";
-      $("sortBtn").innerHTML = `Ordenar por ${sortLabel}<span>▾</span>`;
+      $("sortBtn").innerHTML = `Ordenar: ${sortLabel} <span>&#9662;</span>`;
       const groupLabel = groupOptions.find(([k]) => k === state.groupBy)?.[1] || "No agrupar";
-      $("groupBtn").innerHTML = `Agrupar por ${groupLabel}<span>▾</span>`;
+      $("groupBtn").innerHTML = `Agrupar: ${groupLabel} <span>&#9662;</span>`;
     }
 
     function setGroupBy(key) {
@@ -1545,13 +1992,14 @@ async def index() -> HTMLResponse:
     }
 
     function iconCell(item) {
-      if (item.icon) return `<span title="${esc(item.icon)}">◆</span>`;
-      return "✳";
+      return `<span class="icon-dot" title="${esc(item.icon || item.domain || "")}"></span>`;
     }
 
     function batteryCell(item) {
       if (item.battery === null || item.battery === undefined || Number.isNaN(Number(item.battery))) return "—";
-      return `${Math.round(Number(item.battery))}% 🔋`;
+      const pct = Math.round(Number(item.battery));
+      const cls = pct < 20 ? "low" : pct < 50 ? "mid" : "";
+      return `<div class="battery-bar"><div class="battery-track"><div class="battery-fill ${cls}" style="width:${pct}%"></div></div>${pct}%</div>`;
     }
 
     function renderRow(item) {
@@ -1559,12 +2007,15 @@ async def index() -> HTMLResponse:
       const deviceLabel = item.friendly_name || item.entity_id || "sin nombre";
       const cells = [];
       if (cols.includes("icon")) cells.push(`<td class="col-icon">${iconCell(item)}</td>`);
-      if (cols.includes("device")) cells.push(`<td class="col-device"><span class="device-link" onclick="openDetail('${esc(item.entity_id)}')">${esc(deviceLabel)}</span></td>`);
+      if (cols.includes("device")) cells.push(`<td class="col-device">
+        <div class="device-name" onclick="openDetail('${esc(item.entity_id)}')">${esc(deviceLabel)}${item.excluded_by_app ? ' <span class="badge badge-excluded">excluido</span>' : ''}</div>
+        <div class="device-id">${esc(item.entity_id)}</div>
+      </td>`);
       if (cols.includes("area")) cells.push(`<td>${esc(item.area || "—")}</td>`);
       if (cols.includes("integration")) cells.push(`<td>${esc(item.integration || "—")}</td>`);
       if (cols.includes("manufacturer")) cells.push(`<td>${esc(item.manufacturer || "—")}</td>`);
       if (cols.includes("model")) cells.push(`<td>${esc(item.model || "—")}</td>`);
-      if (cols.includes("battery")) cells.push(`<td class="battery">${batteryCell(item)}</td>`);
+      if (cols.includes("battery")) cells.push(`<td>${batteryCell(item)}</td>`);
       return `
         <tr>
           <td class="col-check"><input type="checkbox" ${state.selected.has(item.entity_id) ? "checked" : ""} onchange="toggleRow('${esc(item.entity_id)}', this.checked)"></td>
@@ -1581,19 +2032,22 @@ async def index() -> HTMLResponse:
         const grp = groupValue(item);
         if (state.groupBy !== "none" && grp !== prevGroup) {
           const colCount = 1 + state.visibleColumns.length;
-          html += `<tr class="group-row"><td colspan="${colCount}">${esc(grp)}</td></tr>`;
+          html += `<tr class="group-row"><td colspan="${colCount}" style="padding-left:16px">${esc(grp)}</td></tr>`;
           prevGroup = grp;
         }
         html += renderRow(item);
       }
       if (!html) {
-        html = `<tr><td colspan="${1 + state.visibleColumns.length}">Sin resultados</td></tr>`;
+        const colCount = 1 + state.visibleColumns.length;
+        html = `<tr><td colspan="${colCount}"><div class="empty-state"><div class="empty-icon">&#128269;</div><p>Sin resultados</p></div></td></tr>`;
       }
       $("tbody").innerHTML = html;
       const allVisibleIds = state.rows.map((r) => r.entity_id);
       const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => state.selected.has(id));
       const master = $("masterCheck");
       if (master) master.checked = allSelected;
+      const chip = $("rowCountChip");
+      if (chip) chip.textContent = `${state.rows.length} / ${state.all.length} entidades`;
     }
 
     function updateCatalog() {
@@ -1605,20 +2059,24 @@ async def index() -> HTMLResponse:
     }
 
     function renderSectionItems(name, list) {
-      const container = $(
-        name === "areas" ? "itemsAreas" :
-        name === "integrations" ? "itemsIntegrations" :
-        name === "states" ? "itemsStates" : "itemsTags"
-      );
+      const idMap = { areas: "itemsAreas", integrations: "itemsIntegrations", states: "itemsStates", tags: "itemsTags" };
+      const countMap = { areas: "countAreas", integrations: "countIntegrations", states: "countStates", tags: "countTags" };
+      const container = $(idMap[name]);
       const selectedSet = state.filters[name];
       container.innerHTML = list.map((value) => `
         <label class="section-item">
           <input type="checkbox" ${selectedSet.has(value) ? "checked" : ""} onchange="toggleFilterValue('${name}', '${esc(value)}', this.checked)">
           ${esc(value)}
         </label>
-      `).join("") || `<div class="section-item" style="color:#7f8a97">Sin valores</div>`;
-      const countId = name === "areas" ? "countAreas" : name === "integrations" ? "countIntegrations" : name === "states" ? "countStates" : "countTags";
-      $(countId).textContent = selectedSet.size ? `${selectedSet.size} sel.` : "";
+      `).join("") || `<div style="padding:6px 4px;color:var(--muted);font-size:12px">Sin valores</div>`;
+      const countEl = $(countMap[name]);
+      if (selectedSet.size) {
+        countEl.textContent = selectedSet.size;
+        countEl.classList.add("visible");
+      } else {
+        countEl.textContent = "";
+        countEl.classList.remove("visible");
+      }
     }
 
     function renderSidebar() {
@@ -1659,16 +2117,22 @@ async def index() -> HTMLResponse:
       $("dName").textContent = data.friendly_name || "—";
       $("dState").textContent = `${data.state ?? "—"} ${data.unit_of_measurement || ""}`;
       const w = data.statistics?.windows || {};
-      $("d1h").textContent = `${w["1"]?.state_changes || 0} cambios (${(w["1"]?.changes_per_hour || 0).toFixed(2)}/h)`;
-      $("d24h").textContent = `${w["24"]?.state_changes || 0} cambios (${(w["24"]?.changes_per_hour || 0).toFixed(2)}/h)`;
-      $("d7d").textContent = `${w["168"]?.state_changes || 0} cambios (${(w["168"]?.changes_per_hour || 0).toFixed(2)}/h)`;
+      $("d1hNum").textContent = w["1"]?.state_changes ?? "—";
+      $("d1hRate").textContent = w["1"] ? `${(w["1"].changes_per_hour || 0).toFixed(2)}/h` : "";
+      $("d24hNum").textContent = w["24"]?.state_changes ?? "—";
+      $("d24hRate").textContent = w["24"] ? `${(w["24"].changes_per_hour || 0).toFixed(2)}/h` : "";
+      $("d7dNum").textContent = w["168"]?.state_changes ?? "—";
+      $("d7dRate").textContent = w["168"] ? `${(w["168"].changes_per_hour || 0).toFixed(2)}/h` : "";
       $("dLastChanged").textContent = data.last_changed || "—";
       $("dLastUpdated").textContent = data.last_updated || "—";
       const row = state.all.find((r) => r.entity_id === data.entity_id);
       const excluded = Boolean(row?.excluded_by_app);
-      $("dToggleExclusion").textContent = excluded ? "Incluir en recorder" : "Excluir del recorder";
-      $("dToggleExclusion").onclick = async () => {
+      const toggleBtn = $("dToggleExclusion");
+      toggleBtn.textContent = excluded ? "✓ Incluir en recorder" : "✕ Excluir del recorder";
+      toggleBtn.className = "drawer-btn" + (excluded ? "" : " exclude-btn");
+      toggleBtn.onclick = async () => {
         await toggleEntity(data.entity_id, !excluded);
+        closeDrawer();
       };
       $("dOpenHA").onclick = () => window.open(data.ha_entity_url, "_blank");
       $("entityDrawer").classList.add("show");
@@ -1746,9 +2210,9 @@ async def index() -> HTMLResponse:
         const visible = state.visibleColumns.includes(col.key);
         return `
           <div class="col-item">
-            <span style="opacity:.55">☰</span>
+            <span class="col-drag">&#8942;&#8942;</span>
             <span>${col.label}</span>
-            <span class="toggle" onclick="toggleColumn('${col.key}')">${visible ? "👁" : "🙈"}</span>
+            <span class="col-toggle ${visible ? "on" : ""}" onclick="toggleColumn('${col.key}')"></span>
           </div>
         `;
       }).join("");
@@ -1772,7 +2236,7 @@ async def index() -> HTMLResponse:
         renderSidebar();
         applyFilters();
       } catch (err) {
-        $("tbody").innerHTML = `<tr><td colspan="12">Error cargando datos: ${esc(err.message)}</td></tr>`;
+        $("tbody").innerHTML = `<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--danger)">Error cargando datos: ${esc(err.message)}</td></tr>`;
       }
     }
 
@@ -1780,9 +2244,16 @@ async def index() -> HTMLResponse:
       try {
         const status = await api("./api/status");
         const mode = status.metrics_mode || "none";
-        const txt = mode === "sqlite" ? "SQLite" : mode === "mariadb" ? "MariaDB" : "Sin fuente";
-        document.title = `Recorder Control (${txt})`;
-      } catch (_) {}
+        const txt = mode === "sqlite" ? "SQLite" : mode === "mariadb" ? "MariaDB" : "Sin fuente DB";
+        const recording = Boolean(status.recorder_recording);
+        document.title = `Recorder Control · ${txt}`;
+        $("dbBadge").textContent = txt;
+        $("statusDot").className = "status-dot " + (recording ? "ok" : "err");
+        $("statusText").textContent = recording ? "Grabando" : "Detenido";
+      } catch (_) {
+        $("statusDot").className = "status-dot err";
+        $("statusText").textContent = "Sin conexión";
+      }
     }
 
     $("search").addEventListener("input", () => {
@@ -1796,7 +2267,7 @@ async def index() -> HTMLResponse:
         $("groupMenu").classList.remove("show");
         $("sortMenu").classList.remove("show");
       }
-      if (!t.closest(".chip-icon") && !t.closest(".quick")) {
+      if (!t.closest(".icon-btn") && !t.closest(".quick")) {
         $("quickMenu").classList.remove("show");
       }
       if (t.id === "customizeModalBg") closeCustomize();
