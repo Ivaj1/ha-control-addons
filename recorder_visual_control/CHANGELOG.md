@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Published UI refinements and layout adjustments for the new Home Assistant-like panel.
+
 ## 0.7.0
 
 - Pixel-focused redesign to replicate Home Assistant Devices panel layout:
